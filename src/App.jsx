@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Calendar, Clock, Users, TrendingUp, LogOut,
-  Plus, Check, ChevronLeft, ChevronRight, Scissors, User, Receipt, Printer, MessageCircle, Ban, Trash2, FileText,
+  Plus, Check, ChevronLeft, ChevronRight, Scissors, User, Receipt, Printer, MessageCircle, Ban, Trash2, FileText, Package,
 } from "lucide-react";
 
 const LOGO_SRC = "/logo.png";
@@ -1437,6 +1437,183 @@ function ReportesView({ data, businessName }) {
   );
 }
 
+function InventarioManager({ data, persist }) {
+  const [prodNombre, setProdNombre] = useState("");
+  const [prodCantidad, setProdCantidad] = useState(1);
+  const [prodCosto, setProdCosto] = useState(0);
+  const [prodProveedor, setProdProveedor] = useState("");
+  const [compraError, setCompraError] = useState("");
+
+  async function registrarCompra() {
+    if (!prodNombre.trim() || Number(prodCantidad) <= 0 || Number(prodCosto) < 0) {
+      setCompraError("Completa el nombre, la cantidad y el costo.");
+      return;
+    }
+    const nombreNorm = prodNombre.trim();
+    let productos = data.productos || [];
+    let producto = productos.find((p) => p.name.toLowerCase() === nombreNorm.toLowerCase());
+    if (producto) {
+      productos = productos.map((p) =>
+        p.id === producto.id ? { ...p, stock: p.stock + Number(prodCantidad), costoUnitario: Number(prodCosto) } : p
+      );
+    } else {
+      producto = { id: uid(), name: nombreNorm, stock: Number(prodCantidad), costoUnitario: Number(prodCosto) };
+      productos = [...productos, producto];
+    }
+    const compra = {
+      id: uid(), productId: producto.id, productName: nombreNorm,
+      cantidad: Number(prodCantidad), costoUnitario: Number(prodCosto),
+      costoTotal: Number(prodCantidad) * Number(prodCosto),
+      proveedor: prodProveedor.trim(), fecha: todayISO(), createdAt: Date.now(),
+    };
+    await persist({ ...data, productos, compras: [...(data.compras || []), compra] });
+    setProdNombre(""); setProdCantidad(1); setProdCosto(0); setProdProveedor(""); setCompraError("");
+  }
+
+  const [ventaProductoId, setVentaProductoId] = useState("");
+  const [ventaEmpleadoId, setVentaEmpleadoId] = useState("");
+  const [ventaCantidad, setVentaCantidad] = useState(1);
+  const [ventaPrecio, setVentaPrecio] = useState(0);
+  const [ventaError, setVentaError] = useState("");
+
+  const productoSel = (data.productos || []).find((p) => p.id === ventaProductoId);
+
+  async function venderAlEquipo() {
+    if (!productoSel || !ventaEmpleadoId || Number(ventaCantidad) <= 0 || Number(ventaPrecio) < 0) {
+      setVentaError("Completa el producto, la trabajadora, la cantidad y el precio.");
+      return;
+    }
+    if (Number(ventaCantidad) > productoSel.stock) {
+      setVentaError(`Solo quedan ${productoSel.stock} unidades en inventario.`);
+      return;
+    }
+    const empleado = data.employees.find((e) => e.id === ventaEmpleadoId);
+    const cantidad = Number(ventaCantidad);
+    const precioUnitario = Number(ventaPrecio);
+    const total = cantidad * precioUnitario;
+    const utilidad = (precioUnitario - productoSel.costoUnitario) * cantidad;
+    const consecutivo = data.nextVentaEquipo || 1;
+    const ventaEquipo = {
+      id: uid(), consecutivo, productId: productoSel.id, productName: productoSel.name,
+      employeeId: empleado.id, employeeName: empleado.name,
+      cantidad, precioUnitario, costoUnitario: productoSel.costoUnitario,
+      total, utilidad, fecha: todayISO(), createdAt: Date.now(), status: "activa",
+    };
+    const productos = data.productos.map((p) => (p.id === productoSel.id ? { ...p, stock: p.stock - cantidad } : p));
+    await persist({
+      ...data, productos,
+      ventasEquipo: [...(data.ventasEquipo || []), ventaEquipo],
+      nextVentaEquipo: consecutivo + 1,
+    });
+    setVentaProductoId(""); setVentaEmpleadoId(""); setVentaCantidad(1); setVentaPrecio(0); setVentaError("");
+  }
+
+  async function anularVentaEquipo(v) {
+    const ok = window.confirm(`¿Anular esta venta al equipo? Se devuelven ${v.cantidad} unidades al inventario.`);
+    if (!ok) return;
+    const productos = data.productos.map((p) => (p.id === v.productId ? { ...p, stock: p.stock + v.cantidad } : p));
+    await persist({
+      ...data, productos,
+      ventasEquipo: data.ventasEquipo.map((x) => (x.id === v.id ? { ...x, status: "anulada" } : x)),
+    });
+  }
+
+  const productos = data.productos || [];
+  const compras = (data.compras || []).slice().sort((a, b) => b.createdAt - a.createdAt);
+  const ventasEquipo = (data.ventasEquipo || []).slice().sort((a, b) => b.consecutivo - a.consecutivo);
+
+  return (
+    <>
+      <div className="panel">
+        <h3 className="section-title">Registrar compra</h3>
+        <div className="form-grid">
+          <input className="input" placeholder="Producto (ej: Esmalte rojo OPI)" value={prodNombre} onChange={(e) => setProdNombre(e.target.value)} />
+          <input className="input" type="number" placeholder="Cantidad" value={prodCantidad} onChange={(e) => setProdCantidad(e.target.value)} />
+          <input className="input" type="number" placeholder="Costo por unidad" value={prodCosto} onChange={(e) => setProdCosto(e.target.value)} />
+          <input className="input" placeholder="Proveedor (opcional)" value={prodProveedor} onChange={(e) => setProdProveedor(e.target.value)} />
+        </div>
+        {compraError && <p className="error-text">{compraError}</p>}
+        <button className="btn-primary" onClick={registrarCompra}><Plus size={15} /> Registrar compra</button>
+      </div>
+
+      <div className="panel" style={{ marginTop: "1.5rem" }}>
+        <h3 className="section-title">Inventario actual</h3>
+        {productos.length === 0 && <p className="muted">Aún no has registrado compras.</p>}
+        <div className="appt-list">
+          {productos.map((p) => (
+            <div key={p.id} className="appt-row">
+              <div>
+                <div className="appt-service">{p.name}</div>
+                <div className="appt-meta">Costo unitario {money(p.costoUnitario)}</div>
+              </div>
+              <span className={`tag ${p.stock > 0 ? "tag-confirmada" : "tag-cancelada"}`}>{p.stock} en stock</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="panel" style={{ marginTop: "1.5rem" }}>
+        <h3 className="section-title">Venderle al equipo</h3>
+        <div className="form-grid">
+          <select className="input" value={ventaProductoId} onChange={(e) => setVentaProductoId(e.target.value)}>
+            <option value="">Elige un producto</option>
+            {productos.filter((p) => p.stock > 0).map((p) => <option key={p.id} value={p.id}>{p.name} ({p.stock} disp.)</option>)}
+          </select>
+          <select className="input" value={ventaEmpleadoId} onChange={(e) => setVentaEmpleadoId(e.target.value)}>
+            <option value="">Elige a la trabajadora</option>
+            {data.employees.filter((e) => e.active).map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+          </select>
+          <input className="input" type="number" placeholder="Cantidad" value={ventaCantidad} onChange={(e) => setVentaCantidad(e.target.value)} />
+          <input className="input" type="number" placeholder="Precio de venta por unidad" value={ventaPrecio} onChange={(e) => setVentaPrecio(e.target.value)} />
+        </div>
+        {productoSel && (
+          <p className="field-hint">
+            Costo: {money(productoSel.costoUnitario)} por unidad
+            {Number(ventaPrecio) > 0 && ` · Utilidad estimada: ${money((Number(ventaPrecio) - productoSel.costoUnitario) * Number(ventaCantidad || 0))}`}
+          </p>
+        )}
+        {ventaError && <p className="error-text">{ventaError}</p>}
+        <button className="btn-primary" onClick={venderAlEquipo}><Plus size={15} /> Registrar venta al equipo</button>
+      </div>
+
+      <div className="panel" style={{ marginTop: "1.5rem" }}>
+        <h3 className="section-title">Historial de ventas al equipo</h3>
+        {ventasEquipo.length === 0 && <p className="muted">Todavía no le has vendido nada al equipo.</p>}
+        <div className="appt-list">
+          {ventasEquipo.map((v) => (
+            <div key={v.id} className="appt-row">
+              <div>
+                <div className="appt-service"><span className="consec">#{v.consecutivo}</span>{v.productName} × {v.cantidad}</div>
+                <div className="appt-meta">{v.employeeName} · {v.fecha} · {money(v.total)} · utilidad {money(v.utilidad)}</div>
+              </div>
+              <div className="appt-right">
+                <span className={`tag ${v.status === "anulada" ? "tag-cancelada" : "tag-confirmada"}`}>{v.status === "anulada" ? "Anulada" : "Activa"}</span>
+                {v.status !== "anulada" && <button className="btn-ghost-danger" onClick={() => anularVentaEquipo(v)}><Ban size={14} /> Anular</button>}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="panel" style={{ marginTop: "1.5rem" }}>
+        <h3 className="section-title">Historial de compras</h3>
+        {compras.length === 0 && <p className="muted">Sin compras registradas.</p>}
+        <div className="appt-list">
+          {compras.map((c) => (
+            <div key={c.id} className="appt-row">
+              <div>
+                <div className="appt-service">{c.productName} × {c.cantidad}</div>
+                <div className="appt-meta">{c.fecha}{c.proveedor ? ` · ${c.proveedor}` : ""} · {money(c.costoUnitario)}/u</div>
+              </div>
+              <span className="tag tag-admin">{money(c.costoTotal)}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </>
+  );
+}
+
 function TeamApp({ data, persist, session, onLogout }) {
   const me = data.employees.find((e) => e.id === session.id);
   const [tab, setTab] = useState("agenda");
@@ -1448,6 +1625,7 @@ function TeamApp({ data, persist, session, onLogout }) {
       { key: "reportes", label: "Reportes", icon: FileText },
       { key: "equipo", label: "Equipo", icon: Users },
       { key: "servicios", label: "Servicios", icon: Scissors },
+      { key: "inventario", label: "Inventario", icon: Package },
       { key: "estadisticas", label: "Estadísticas", icon: TrendingUp },
     );
   }
@@ -1464,6 +1642,7 @@ function TeamApp({ data, persist, session, onLogout }) {
       {tab === "reportes" && me?.isAdmin && <ReportesView data={data} businessName={data.businessName} />}
       {tab === "equipo" && me?.isAdmin && <TeamManager data={data} persist={persist} />}
       {tab === "servicios" && me?.isAdmin && <ServicesManager data={data} persist={persist} />}
+      {tab === "inventario" && me?.isAdmin && <InventarioManager data={data} persist={persist} />}
       {tab === "estadisticas" && me?.isAdmin && <StatsView data={data} />}
     </Shell>
   );
