@@ -4,7 +4,10 @@ import path from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = path.join(__dirname, "data");
+const DATA_DIR = process.env.DATA_DIR
+  ? path.resolve(process.env.DATA_DIR)
+  : path.join(__dirname, "data");
+const ADMIN_KEY = process.env.ADMIN_KEY || "";
 const COMPANIES_FILE = path.join(DATA_DIR, "companies.json");
 
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -25,16 +28,33 @@ function tenantFile(slug) {
   return path.join(DATA_DIR, `tenant-${safe}.json`);
 }
 
+// Protege las acciones de plataforma (crear/editar empresas, borrar datos) con la
+// clave maestra guardada en la variable de entorno ADMIN_KEY de Railway.
+function requireAdminKey(req, res, next) {
+  if (!ADMIN_KEY) return res.status(500).json({ error: "ADMIN_KEY no está configurada en el servidor" });
+  const provided = req.header("x-admin-key") || "";
+  if (provided !== ADMIN_KEY) return res.status(401).json({ error: "Clave maestra incorrecta" });
+  next();
+}
+
 const app = express();
 app.use(express.json({ limit: "2mb" }));
 
-// Registro de empresas de la plataforma (nombre, código, vigencia, admin de plataforma)
+// Verifica la clave maestra desde la pantalla de acceso a la plataforma
+app.post("/api/admin/verify", (req, res) => {
+  const key = req.body?.key || "";
+  res.json({ ok: !!ADMIN_KEY && key === ADMIN_KEY });
+});
+
+// Registro de empresas de la plataforma (nombre, código, vigencia)
+// Lectura pública (la necesita la puerta de entrada para validar códigos);
+// escritura protegida con la clave maestra.
 app.get("/api/companies", (req, res) => {
   const reg = readJSON(COMPANIES_FILE);
   if (!reg) return res.status(404).json(null);
   res.json(reg);
 });
-app.post("/api/companies", (req, res) => {
+app.post("/api/companies", requireAdminKey, (req, res) => {
   writeJSON(COMPANIES_FILE, req.body);
   res.json({ ok: true });
 });
@@ -47,6 +67,11 @@ app.get("/api/tenant/:slug", (req, res) => {
 });
 app.post("/api/tenant/:slug", (req, res) => {
   writeJSON(tenantFile(req.params.slug), req.body);
+  res.json({ ok: true });
+});
+app.delete("/api/tenant/:slug", requireAdminKey, (req, res) => {
+  const f = tenantFile(req.params.slug);
+  if (fs.existsSync(f)) fs.unlinkSync(f);
   res.json({ ok: true });
 });
 
