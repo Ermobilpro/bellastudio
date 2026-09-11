@@ -2348,6 +2348,22 @@ export default function App() {
   });
 
   useEffect(() => {
+    // El botón "Atrás" del navegador no debe sacar a la usuaria de la app —
+    // la app no tiene páginas separadas, así que atrapamos la navegación hacia
+    // atrás y la reemplazamos por quedarnos en el mismo lugar.
+    try {
+      window.history.pushState(null, "", window.location.href);
+    } catch { /* noop */ }
+    function handlePopState() {
+      try {
+        window.history.pushState(null, "", window.location.href);
+      } catch { /* noop */ }
+    }
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
+  useEffect(() => {
     (async () => {
       const res = await apiGetCompanies();
       if (res) {
