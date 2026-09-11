@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Calendar, Clock, Users, TrendingUp, LogOut,
-  Plus, Check, ChevronLeft, ChevronRight, Scissors, User,
+  Plus, Check, ChevronLeft, ChevronRight, Scissors, User, Receipt, Printer, MessageCircle, Ban, Trash2,
 } from "lucide-react";
 
 const LOGO_SRC = "/logo.png";
@@ -385,6 +385,27 @@ html, body, #root{ height:100%; margin:0; padding:0; }
 .stat-label{ font-size:.75rem; color:var(--muted); margin-top:.2rem; }
 .tips-list{ display:flex; flex-direction:column; gap:.6rem; padding-left:1.1rem; margin:0; }
 .tips-list li{ font-size:.9rem; line-height:1.45; }
+
+/* --- Ventas / comprobante --- */
+.filter-row{ display:flex; gap:.4rem; margin-bottom:1rem; flex-wrap:wrap; }
+.summary-bar{ display:flex; gap:1.5rem; flex-wrap:wrap; background:var(--soft); border:1px solid var(--line); border-radius:12px; padding:.9rem 1.1rem; margin-bottom:1rem; }
+.summary-item{ font-size:.85rem; color:var(--muted); }
+.summary-item strong{ display:block; font-family:Georgia,serif; font-size:1.25rem; color:var(--ink); }
+.consec{ font-family:Georgia,serif; font-weight:600; color:var(--gold); margin-right:.4rem; }
+.modal-overlay{ position:fixed; inset:0; background:rgba(46,20,33,.45); display:flex; align-items:center; justify-content:center; z-index:80; padding:1rem; }
+.modal-card{ background:var(--paper); border-radius:18px; padding:1.7rem; max-width:380px; width:100%; box-shadow:var(--shadow); max-height:90vh; overflow:auto; }
+.receipt{ text-align:center; }
+.receipt hr{ border:none; border-top:1px solid var(--line); margin:.9rem 0; }
+.receipt p{ margin:.35rem 0; font-size:.92rem; text-align:left; }
+.receipt-total{ font-size:1.25rem !important; margin-top:.8rem !important; text-align:center !important; }
+.receipt-num{ color:var(--muted); font-size:.85rem; }
+
+@media print {
+  body *{ visibility:hidden; }
+  #receipt-print, #receipt-print *{ visibility:visible; }
+  #receipt-print{ position:absolute; top:0; left:0; width:100%; padding:2rem; }
+  .no-print{ display:none !important; }
+}
 
 @media (max-width: 760px){
   .hero{ flex-direction:column; padding:3rem 6%; min-height:auto; gap:2rem; }
@@ -950,7 +971,33 @@ function AgendaView({ data, persist, employeeId, onlyMine }) {
   function serviceName(sid) { return data.services.find((s) => s.id === sid)?.name || "—"; }
 
   async function setStatus(id, status) {
-    await persist({ ...data, appointments: data.appointments.map((a) => (a.id === id ? { ...a, status } : a)) });
+    let next = { ...data, appointments: data.appointments.map((a) => (a.id === id ? { ...a, status } : a)) };
+    if (status === "completada") {
+      const appt = data.appointments.find((a) => a.id === id);
+      const yaFacturada = (data.ventas || []).some((v) => v.appointmentId === id);
+      if (appt && !yaFacturada) {
+        const consecutivo = data.nextConsecutivo || 1;
+        const venta = {
+          id: uid(),
+          consecutivo,
+          appointmentId: appt.id,
+          clientId: appt.clientId,
+          clientName: clientName(appt.clientId),
+          clientPhone: clientPhone(appt.clientId),
+          employeeId: appt.employeeId,
+          employeeName: employeeName(appt.employeeId),
+          serviceId: appt.serviceId,
+          serviceName: appt.serviceName,
+          price: appt.price,
+          date: appt.date,
+          time: appt.time,
+          createdAt: Date.now(),
+          status: "activa",
+        };
+        next = { ...next, ventas: [...(data.ventas || []), venta], nextConsecutivo: consecutivo + 1 };
+      }
+    }
+    await persist(next);
   }
 
   return (
@@ -1177,6 +1224,113 @@ function StatsView({ data }) {
   );
 }
 
+/* ---------------------------------- Ventas ---------------------------------- */
+
+function ventaEnRango(venta, filtro) {
+  if (filtro === "todas") return true;
+  const d = fromISO(venta.date);
+  const today = new Date();
+  if (filtro === "hoy") return venta.date === todayISO();
+  if (filtro === "semana") {
+    const start = new Date(today);
+    start.setDate(today.getDate() - today.getDay());
+    const end = new Date(start);
+    end.setDate(start.getDate() + 6);
+    const dOnly = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    const sOnly = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+    const eOnly = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+    return dOnly >= sOnly && dOnly <= eOnly;
+  }
+  if (filtro === "mes") return d.getFullYear() === today.getFullYear() && d.getMonth() === today.getMonth();
+  return true;
+}
+
+function VentaReceipt({ venta, businessName, onClose }) {
+  return (
+    <div className="modal-overlay no-print" onClick={onClose}>
+      <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+        <div id="receipt-print" className="receipt">
+          <h3>{businessName}</h3>
+          <p className="receipt-num">Comprobante de servicio N.° {venta.consecutivo}</p>
+          <hr />
+          <p><strong>Clienta:</strong> {venta.clientName}</p>
+          <p><strong>Servicio:</strong> {venta.serviceName}</p>
+          <p><strong>Atendido por:</strong> {venta.employeeName}</p>
+          <p><strong>Fecha:</strong> {venta.date} · {venta.time}</p>
+          {venta.status === "anulada" && <p style={{ color: "var(--danger)" }}><strong>ANULADA</strong></p>}
+          <hr />
+          <p className="receipt-total"><strong>{money(venta.price)}</strong></p>
+        </div>
+        <div className="row-gap no-print" style={{ marginTop: "1.2rem" }}>
+          <button className="btn-ghost" onClick={onClose}>Cerrar</button>
+          <button className="btn-primary" onClick={() => window.print()}><Printer size={15} /> Imprimir / PDF</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function VentasManager({ data, persist, businessName }) {
+  const [filtro, setFiltro] = useState("hoy");
+  const [viendo, setViendo] = useState(null);
+
+  const ventas = (data.ventas || []).slice().sort((a, b) => b.consecutivo - a.consecutivo);
+  const filtradas = ventas.filter((v) => ventaEnRango(v, filtro));
+  const activas = filtradas.filter((v) => v.status !== "anulada");
+  const total = activas.reduce((sum, v) => sum + v.price, 0);
+
+  async function anular(venta) {
+    const ok = window.confirm(`¿Anular la venta N.° ${venta.consecutivo}? Queda marcada como anulada pero no se borra del historial.`);
+    if (!ok) return;
+    await persist({ ...data, ventas: data.ventas.map((v) => (v.id === venta.id ? { ...v, status: "anulada" } : v)) });
+  }
+  async function eliminar(venta) {
+    const ok = window.confirm(`¿Eliminar definitivamente la venta N.° ${venta.consecutivo}? Esta acción no se puede deshacer.`);
+    if (!ok) return;
+    await persist({ ...data, ventas: data.ventas.filter((v) => v.id !== venta.id) });
+  }
+  function enviarWhatsapp(venta) {
+    const phone = (venta.clientPhone || "").replace(/\D/g, "");
+    if (!phone) { window.alert("Esta clienta no tiene teléfono registrado."); return; }
+    const msg = `Hola ${venta.clientName}, aquí tienes tu comprobante de ${businessName}:\n\nN.° ${venta.consecutivo}\nServicio: ${venta.serviceName}\nValor: ${money(venta.price)}\nFecha: ${venta.date}\n\n¡Gracias por tu visita!`;
+    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, "_blank");
+  }
+
+  return (
+    <div className="panel">
+      <h3 className="section-title">Ventas</h3>
+      <div className="filter-row">
+        {[["hoy", "Hoy"], ["semana", "Esta semana"], ["mes", "Este mes"], ["todas", "Todas"]].map(([k, l]) => (
+          <button key={k} className={`chip ${filtro === k ? "chip-active" : ""}`} onClick={() => setFiltro(k)}>{l}</button>
+        ))}
+      </div>
+      <div className="summary-bar">
+        <div className="summary-item">Ventas activas<strong>{activas.length}</strong></div>
+        <div className="summary-item">Total facturado<strong>{money(total)}</strong></div>
+      </div>
+      {filtradas.length === 0 && <p className="muted">No hay ventas en este rango. Se generan solas cuando marcas una cita como "Completada" en la agenda.</p>}
+      <div className="appt-list">
+        {filtradas.map((v) => (
+          <div key={v.id} className="appt-row">
+            <div>
+              <div className="appt-service"><span className="consec">#{v.consecutivo}</span>{v.serviceName}</div>
+              <div className="appt-meta">{v.clientName} · {v.date} · con {v.employeeName} · {money(v.price)}</div>
+            </div>
+            <div className="appt-right">
+              <span className={`tag ${v.status === "anulada" ? "tag-cancelada" : "tag-confirmada"}`}>{v.status === "anulada" ? "Anulada" : "Activa"}</span>
+              <button className="btn-ghost" onClick={() => setViendo(v)}><Printer size={14} /> Ver / Imprimir</button>
+              <button className="btn-ghost" onClick={() => enviarWhatsapp(v)}><MessageCircle size={14} /> WhatsApp</button>
+              {v.status !== "anulada" && <button className="btn-ghost" onClick={() => anular(v)}><Ban size={14} /> Anular</button>}
+              <button className="btn-ghost-danger" onClick={() => eliminar(v)}><Trash2 size={14} /> Eliminar</button>
+            </div>
+          </div>
+        ))}
+      </div>
+      {viendo && <VentaReceipt venta={viendo} businessName={businessName} onClose={() => setViendo(null)} />}
+    </div>
+  );
+}
+
 function TeamApp({ data, persist, session, onLogout }) {
   const me = data.employees.find((e) => e.id === session.id);
   const [tab, setTab] = useState("agenda");
@@ -1184,6 +1338,7 @@ function TeamApp({ data, persist, session, onLogout }) {
   if (me?.isAdmin) {
     navItems.push(
       { key: "citas", label: "Todas las citas", icon: Clock },
+      { key: "ventas", label: "Ventas", icon: Receipt },
       { key: "equipo", label: "Equipo", icon: Users },
       { key: "servicios", label: "Servicios", icon: Scissors },
       { key: "estadisticas", label: "Estadísticas", icon: TrendingUp },
@@ -1198,6 +1353,7 @@ function TeamApp({ data, persist, session, onLogout }) {
     >
       {tab === "agenda" && <AgendaView data={data} persist={persist} employeeId={me.id} onlyMine />}
       {tab === "citas" && me?.isAdmin && <AgendaView data={data} persist={persist} onlyMine={false} />}
+      {tab === "ventas" && me?.isAdmin && <VentasManager data={data} persist={persist} businessName={data.businessName} />}
       {tab === "equipo" && me?.isAdmin && <TeamManager data={data} persist={persist} />}
       {tab === "servicios" && me?.isAdmin && <ServicesManager data={data} persist={persist} />}
       {tab === "estadisticas" && me?.isAdmin && <StatsView data={data} />}
