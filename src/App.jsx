@@ -402,6 +402,7 @@ html, body, #root{ height:100%; margin:0; padding:0; }
 .receipt{ text-align:center; }
 .receipt hr{ border:none; border-top:1px solid var(--line); margin:.9rem 0; }
 .receipt p{ margin:.35rem 0; font-size:.92rem; text-align:left; }
+.receipt-line{ display:flex; justify-content:space-between; gap:.6rem; }
 .receipt-total{ font-size:1.25rem !important; margin-top:.8rem !important; text-align:center !important; }
 .receipt-num{ color:var(--muted); font-size:.85rem; }
 
@@ -957,11 +958,13 @@ function ClientApp({ data, persist, session, onLogout }) {
 
 /* ---------------------------------- Vista equipo / admin ---------------------------------- */
 
-function AgendaView({ data, persist, employeeId, onlyMine }) {
+function AgendaView({ data, persist, employeeId, onlyMine, isAdmin }) {
   const [calYear, setCalYear] = useState(new Date().getFullYear());
   const [calMonth, setCalMonth] = useState(new Date().getMonth());
   const [selectedDate, setSelectedDate] = useState(todayISO());
   const [filterEmp, setFilterEmp] = useState("todas");
+  const [expandedId, setExpandedId] = useState(null);
+  const [addServiceId, setAddServiceId] = useState("");
 
   const scoped = data.appointments.filter((a) =>
     onlyMine ? a.employeeId === employeeId : (filterEmp === "todas" || a.employeeId === filterEmp)
@@ -974,6 +977,7 @@ function AgendaView({ data, persist, employeeId, onlyMine }) {
   function clientPhone(id) { return data.clients.find((c) => c.id === id)?.phone || ""; }
   function employeeName(id) { return data.employees.find((e) => e.id === id)?.name || "—"; }
   function serviceName(sid) { return data.services.find((s) => s.id === sid)?.name || "—"; }
+  function apptTotal(a) { return a.price + (a.extras || []).reduce((s, e) => s + e.price, 0); }
 
   async function setStatus(id, status) {
     let next = { ...data, appointments: data.appointments.map((a) => (a.id === id ? { ...a, status } : a)) };
@@ -981,6 +985,11 @@ function AgendaView({ data, persist, employeeId, onlyMine }) {
       const appt = data.appointments.find((a) => a.id === id);
       const yaFacturada = (data.ventas || []).some((v) => v.appointmentId === id);
       if (appt && !yaFacturada) {
+        const items = [
+          { name: appt.serviceName, price: appt.price },
+          ...(appt.extras || []).map((e) => ({ name: e.serviceName, price: e.price })),
+        ];
+        const total = items.reduce((s, it) => s + it.price, 0);
         const consecutivo = data.nextConsecutivo || 1;
         const venta = {
           id: uid(),
@@ -993,7 +1002,8 @@ function AgendaView({ data, persist, employeeId, onlyMine }) {
           employeeName: employeeName(appt.employeeId),
           serviceId: appt.serviceId,
           serviceName: appt.serviceName,
-          price: appt.price,
+          items,
+          price: total,
           date: appt.date,
           time: appt.time,
           createdAt: Date.now(),
@@ -1005,48 +1015,145 @@ function AgendaView({ data, persist, employeeId, onlyMine }) {
     await persist(next);
   }
 
+  async function agregarExtra(a) {
+    if (!addServiceId) return;
+    const s = data.services.find((x) => x.id === addServiceId);
+    if (!s) return;
+    const extra = { id: uid(), serviceId: s.id, serviceName: s.name, price: s.price, addedAt: Date.now() };
+    const appointments = data.appointments.map((x) => (x.id === a.id ? { ...x, extras: [...(x.extras || []), extra] } : x));
+    await persist({ ...data, appointments });
+    setAddServiceId("");
+  }
+
+  async function eliminarExtraAdmin(a, extra) {
+    const ok = window.confirm(`¿Eliminar "${extra.serviceName}" de esta cita?`);
+    if (!ok) return;
+    const appointments = data.appointments.map((x) => (x.id === a.id ? { ...x, extras: (x.extras || []).filter((e) => e.id !== extra.id) } : x));
+    await persist({ ...data, appointments });
+  }
+
+  async function solicitarDevolucion(a, extra) {
+    const dev = {
+      id: uid(), appointmentId: a.id, extraId: extra.id, serviceName: extra.serviceName, price: extra.price,
+      employeeId, employeeName: employeeName(employeeId),
+      estado: "pendiente", solicitadaEn: Date.now(),
+    };
+    await persist({ ...data, devoluciones: [...(data.devoluciones || []), dev] });
+  }
+
+  async function resolverDevolucion(dev, aprobar) {
+    let appointments = data.appointments;
+    if (aprobar) {
+      appointments = data.appointments.map((x) =>
+        x.id === dev.appointmentId ? { ...x, extras: (x.extras || []).filter((e) => e.id !== dev.extraId) } : x
+      );
+    }
+    const devoluciones = data.devoluciones.map((d) => (d.id === dev.id ? { ...d, estado: aprobar ? "aprobada" : "rechazada" } : d));
+    await persist({ ...data, appointments, devoluciones });
+  }
+
+  const pendientesDevolucion = isAdmin ? (data.devoluciones || []).filter((d) => d.estado === "pendiente") : [];
+
   return (
-    <div className="panel two-col">
-      <div>
-        {!onlyMine && (
-          <select className="input" style={{ marginBottom: ".9rem" }} value={filterEmp} onChange={(e) => setFilterEmp(e.target.value)}>
-            <option value="todas">Todo el equipo</option>
-            {data.employees.filter((e) => e.active).map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
-          </select>
-        )}
-        <MonthCalendar
-          year={calYear} month={calMonth} selectedDate={selectedDate}
-          onMonthChange={(y, m) => { setCalYear(y); setCalMonth(m); }}
-          onSelect={setSelectedDate}
-          renderBadge={(iso) => (dayCount(iso) > 0 ? <span className="cal-badge">{dayCount(iso)}</span> : null)}
-        />
-      </div>
-      <div>
-        <h3 className="section-title">{selectedDate}</h3>
-        {dayAppts.length === 0 && <p className="muted">Sin citas este día.</p>}
-        <div className="appt-list">
-          {dayAppts.map((a) => (
-            <div key={a.id} className="appt-row">
-              <div>
-                <div className="appt-service">{a.time} · {serviceName(a.serviceId)}</div>
-                <div className="appt-meta">
-                  {clientName(a.clientId)} · {clientPhone(a.clientId)}{!onlyMine ? ` · con ${employeeName(a.employeeId)}` : ""}
+    <>
+      {pendientesDevolucion.length > 0 && (
+        <div className="panel" style={{ marginBottom: "1.5rem" }}>
+          <h3 className="section-title">Solicitudes de devolución pendientes</h3>
+          <div className="appt-list">
+            {pendientesDevolucion.map((d) => (
+              <div key={d.id} className="appt-row">
+                <div>
+                  <div className="appt-service">{d.serviceName} · {money(d.price)}</div>
+                  <div className="appt-meta">Solicitada por {d.employeeName}</div>
+                </div>
+                <div className="appt-right">
+                  <button className="btn-primary" onClick={() => resolverDevolucion(d, true)}>Aceptar y eliminar</button>
+                  <button className="btn-ghost" onClick={() => resolverDevolucion(d, false)}>Rechazar</button>
                 </div>
               </div>
-              <div className="appt-right">
-                <span className={`tag tag-${a.status}`}>{a.status}</span>
-                {a.status === "confirmada" && (
-                  <>
-                    <button className="btn-ghost" onClick={() => setStatus(a.id, "completada")}>Completada</button>
-                    <button className="btn-ghost-danger" onClick={() => setStatus(a.id, "cancelada")}>Cancelar</button>
-                  </>
+            ))}
+          </div>
+        </div>
+      )}
+      <div className="panel two-col">
+        <div>
+          {!onlyMine && (
+            <select className="input" style={{ marginBottom: ".9rem" }} value={filterEmp} onChange={(e) => setFilterEmp(e.target.value)}>
+              <option value="todas">Todo el equipo</option>
+              {data.employees.filter((e) => e.active).map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+            </select>
+          )}
+          <MonthCalendar
+            year={calYear} month={calMonth} selectedDate={selectedDate}
+            onMonthChange={(y, m) => { setCalYear(y); setCalMonth(m); }}
+            onSelect={setSelectedDate}
+            renderBadge={(iso) => (dayCount(iso) > 0 ? <span className="cal-badge">{dayCount(iso)}</span> : null)}
+          />
+        </div>
+        <div>
+          <h3 className="section-title">{selectedDate}</h3>
+          {dayAppts.length === 0 && <p className="muted">Sin citas este día.</p>}
+          <div className="appt-list">
+            {dayAppts.map((a) => (
+              <div key={a.id} className="appt-row" style={{ flexDirection: "column", alignItems: "stretch" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: ".75rem", width: "100%" }}>
+                  <div>
+                    <div className="appt-service">{a.time} · {serviceName(a.serviceId)}</div>
+                    <div className="appt-meta">
+                      {clientName(a.clientId)} · {clientPhone(a.clientId)}{!onlyMine ? ` · con ${employeeName(a.employeeId)}` : ""} · Total {money(apptTotal(a))}
+                    </div>
+                  </div>
+                  <div className="appt-right">
+                    <span className={`tag tag-${a.status}`}>{a.status}</span>
+                    {a.status === "confirmada" && (
+                      <>
+                        <button className="btn-ghost" onClick={() => setExpandedId(expandedId === a.id ? null : a.id)}>
+                          {expandedId === a.id ? "Cerrar" : "+ Servicio"}
+                        </button>
+                        <button className="btn-ghost" onClick={() => setStatus(a.id, "completada")}>Completada</button>
+                        <button className="btn-ghost-danger" onClick={() => setStatus(a.id, "cancelada")}>Cancelar</button>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {(a.extras || []).length > 0 && (
+                  <div style={{ width: "100%", marginTop: ".7rem", display: "flex", flexDirection: "column", gap: ".4rem" }}>
+                    {a.extras.map((e) => {
+                      const pend = (data.devoluciones || []).find((d) => d.extraId === e.id && d.estado === "pendiente");
+                      return (
+                        <div key={e.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: ".85rem", color: "var(--muted)" }}>
+                          <span>+ {e.serviceName} · {money(e.price)}</span>
+                          {a.status === "confirmada" && (
+                            pend ? (
+                              <span className="tag tag-completada">Devolución pendiente</span>
+                            ) : isAdmin ? (
+                              <button className="btn-ghost-danger" onClick={() => eliminarExtraAdmin(a, e)}>Eliminar</button>
+                            ) : (
+                              <button className="btn-ghost" onClick={() => solicitarDevolucion(a, e)}>Solicitar eliminar</button>
+                            )
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {expandedId === a.id && (
+                  <div style={{ width: "100%", marginTop: ".9rem", paddingTop: ".9rem", borderTop: "1px solid var(--line)", display: "flex", gap: ".5rem", flexWrap: "wrap", alignItems: "center" }}>
+                    <select className="input" style={{ maxWidth: 260 }} value={addServiceId} onChange={(e) => setAddServiceId(e.target.value)}>
+                      <option value="">Elige un servicio</option>
+                      {data.services.map((s) => <option key={s.id} value={s.id}>{s.name} · {money(s.price)}</option>)}
+                    </select>
+                    <button className="btn-primary" onClick={() => agregarExtra(a)}>Agregar</button>
+                  </div>
                 )}
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       </div>
-    </div>
+    </>
   );
 }
 
@@ -1259,7 +1366,15 @@ function VentaReceipt({ venta, businessName, onClose }) {
           <p className="receipt-num">Comprobante de servicio N.° {venta.consecutivo}</p>
           <hr />
           <p><strong>Clienta:</strong> {venta.clientName}</p>
-          <p><strong>Servicio:</strong> {venta.serviceName}</p>
+          {venta.items && venta.items.length > 1 ? (
+            <>
+              {venta.items.map((it, i) => (
+                <p key={i} className="receipt-line"><span>{it.name}</span><span>{money(it.price)}</span></p>
+              ))}
+            </>
+          ) : (
+            <p><strong>Servicio:</strong> {venta.serviceName}</p>
+          )}
           <p><strong>Atendido por:</strong> {venta.employeeName}</p>
           <p><strong>Fecha:</strong> {venta.date} · {venta.time}</p>
           {venta.status === "anulada" && <p style={{ color: "var(--danger)" }}><strong>ANULADA</strong></p>}
@@ -1732,8 +1847,8 @@ function TeamApp({ data, persist, session, onLogout }) {
       roleLabel={me?.isAdmin ? "Administradora" : "Equipo"}
       nav={navItems} active={tab} onNav={setTab} onLogout={onLogout}
     >
-      {tab === "agenda" && <AgendaView data={data} persist={persist} employeeId={me.id} onlyMine />}
-      {tab === "citas" && me?.isAdmin && <AgendaView data={data} persist={persist} onlyMine={false} />}
+      {tab === "agenda" && <AgendaView data={data} persist={persist} employeeId={me.id} onlyMine isAdmin={!!me?.isAdmin} />}
+      {tab === "citas" && me?.isAdmin && <AgendaView data={data} persist={persist} onlyMine={false} isAdmin />}
       {tab === "ventas" && me?.isAdmin && <VentasManager data={data} persist={persist} businessName={data.businessName} />}
       {tab === "reportes" && me?.isAdmin && <ReportesView data={data} businessName={data.businessName} />}
       {tab === "equipo" && me?.isAdmin && <TeamManager data={data} persist={persist} />}
