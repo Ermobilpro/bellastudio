@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Calendar, Clock, Users, TrendingUp, LogOut,
-  Plus, Check, ChevronLeft, ChevronRight, Scissors, User, Receipt, Printer, MessageCircle, Ban, Trash2, FileText, Package,
+  Plus, Check, ChevronLeft, ChevronRight, Scissors, User, Receipt, Printer, MessageCircle, Ban, Trash2, FileText, Package, Wallet,
 } from "lucide-react";
 
 const LOGO_SRC = "/logo.png";
@@ -21,7 +21,10 @@ function toISO(d) { return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(
 function fromISO(s) { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d); }
 function timeToMin(t) { const [h, m] = t.split(":").map(Number); return h * 60 + m; }
 function minToTime(mm) { return `${pad2(Math.floor(mm / 60))}:${pad2(mm % 60)}`; }
-function money(n) { return "$" + Math.round(n).toLocaleString("es-CO"); }
+function money(n) {
+  const sign = n < 0 ? "-" : "";
+  return sign + "$" + Math.round(Math.abs(n)).toLocaleString("es-CO");
+}
 function todayISO() { return toISO(new Date()); }
 function initialOf(name) { return (name || "?").trim().charAt(0).toUpperCase(); }
 
@@ -1614,6 +1617,98 @@ function InventarioManager({ data, persist }) {
   );
 }
 
+const GASTO_CATEGORIAS = ["Arriendo", "Servicios públicos", "Insumos", "Nómina", "Otro"];
+
+function GastosManager({ data, persist }) {
+  const [concepto, setConcepto] = useState("");
+  const [categoria, setCategoria] = useState(GASTO_CATEGORIAS[0]);
+  const [monto, setMonto] = useState(0);
+  const [fecha, setFecha] = useState(todayISO());
+  const [error, setError] = useState("");
+
+  async function addGasto() {
+    if (!concepto.trim() || Number(monto) <= 0) { setError("Completa el concepto y el monto."); return; }
+    const gasto = { id: uid(), concepto: concepto.trim(), categoria, monto: Number(monto), fecha, createdAt: Date.now() };
+    await persist({ ...data, gastos: [...(data.gastos || []), gasto] });
+    setConcepto(""); setMonto(0); setFecha(todayISO()); setError("");
+  }
+  async function removeGasto(g) {
+    const ok = window.confirm(`¿Eliminar el gasto "${g.concepto}"?`);
+    if (!ok) return;
+    await persist({ ...data, gastos: data.gastos.filter((x) => x.id !== g.id) });
+  }
+
+  const now = new Date();
+  const y = now.getFullYear(), m = now.getMonth();
+  const gastosMes = (data.gastos || []).filter((g) => { const d = fromISO(g.fecha); return d.getFullYear() === y && d.getMonth() === m; });
+  const totalGastos = gastosMes.reduce((s, g) => s + g.monto, 0);
+
+  const ventasMes = (data.ventas || []).filter((v) => v.status !== "anulada" && (() => { const d = fromISO(v.date); return d.getFullYear() === y && d.getMonth() === m; })());
+  const totalIngresos = ventasMes.reduce((s, v) => s + v.price, 0);
+  const utilidadNeta = totalIngresos - totalGastos;
+
+  const porTrabajadora = {};
+  ventasMes.forEach((v) => { porTrabajadora[v.employeeName] = (porTrabajadora[v.employeeName] || 0) + v.price; });
+
+  const gastosOrdenados = (data.gastos || []).slice().sort((a, b) => (a.fecha < b.fecha ? 1 : a.fecha > b.fecha ? -1 : b.createdAt - a.createdAt));
+
+  return (
+    <>
+      <div className="panel">
+        <h3 className="section-title">Registrar gasto</h3>
+        <div className="form-grid">
+          <input className="input" placeholder="Concepto (ej: Arriendo local)" value={concepto} onChange={(e) => setConcepto(e.target.value)} />
+          <select className="input" value={categoria} onChange={(e) => setCategoria(e.target.value)}>
+            {GASTO_CATEGORIAS.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+          <input className="input" type="number" placeholder="Monto" value={monto} onChange={(e) => setMonto(e.target.value)} />
+          <input className="input" type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} />
+        </div>
+        {error && <p className="error-text">{error}</p>}
+        <button className="btn-primary" onClick={addGasto}><Plus size={15} /> Registrar gasto</button>
+      </div>
+
+      <div className="panel" style={{ marginTop: "1.5rem" }}>
+        <h3 className="section-title">Este mes ({MONTHS[m]})</h3>
+        <div className="stat-grid">
+          <div className="stat-card"><div className="stat-num">{money(totalIngresos)}</div><div className="stat-label">Ingresos</div></div>
+          <div className="stat-card"><div className="stat-num">{money(totalGastos)}</div><div className="stat-label">Gastos</div></div>
+          <div className="stat-card"><div className="stat-num">{money(utilidadNeta)}</div><div className="stat-label">Utilidad neta</div></div>
+        </div>
+        <h4 className="report-sub" style={{ marginTop: "1.3rem" }}>Ingresos por trabajadora</h4>
+        <div className="appt-list">
+          {Object.entries(porTrabajadora).map(([name, tot]) => (
+            <div key={name} className="appt-row">
+              <div className="appt-service">{name}</div>
+              <span className="muted">{money(tot)}</span>
+            </div>
+          ))}
+          {Object.keys(porTrabajadora).length === 0 && <p className="muted">Sin ventas este mes todavía.</p>}
+        </div>
+      </div>
+
+      <div className="panel" style={{ marginTop: "1.5rem" }}>
+        <h3 className="section-title">Historial de gastos</h3>
+        {gastosOrdenados.length === 0 && <p className="muted">Sin gastos registrados.</p>}
+        <div className="appt-list">
+          {gastosOrdenados.map((g) => (
+            <div key={g.id} className="appt-row">
+              <div>
+                <div className="appt-service">{g.concepto}</div>
+                <div className="appt-meta">{g.categoria} · {g.fecha}</div>
+              </div>
+              <div className="appt-right">
+                <span className="tag tag-cancelada">{money(g.monto)}</span>
+                <button className="btn-ghost-danger" onClick={() => removeGasto(g)}><Trash2 size={14} /> Eliminar</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </>
+  );
+}
+
 function TeamApp({ data, persist, session, onLogout }) {
   const me = data.employees.find((e) => e.id === session.id);
   const [tab, setTab] = useState("agenda");
@@ -1626,6 +1721,7 @@ function TeamApp({ data, persist, session, onLogout }) {
       { key: "equipo", label: "Equipo", icon: Users },
       { key: "servicios", label: "Servicios", icon: Scissors },
       { key: "inventario", label: "Inventario", icon: Package },
+      { key: "gastos", label: "Gastos", icon: Wallet },
       { key: "estadisticas", label: "Estadísticas", icon: TrendingUp },
     );
   }
@@ -1643,6 +1739,7 @@ function TeamApp({ data, persist, session, onLogout }) {
       {tab === "equipo" && me?.isAdmin && <TeamManager data={data} persist={persist} />}
       {tab === "servicios" && me?.isAdmin && <ServicesManager data={data} persist={persist} />}
       {tab === "inventario" && me?.isAdmin && <InventarioManager data={data} persist={persist} />}
+      {tab === "gastos" && me?.isAdmin && <GastosManager data={data} persist={persist} />}
       {tab === "estadisticas" && me?.isAdmin && <StatsView data={data} />}
     </Shell>
   );
