@@ -91,11 +91,11 @@ async function apiGetTenant(slug) {
     return null;
   }
 }
-async function apiSetTenant(slug, obj) {
+async function apiSetTenant(slug, obj, writeKey) {
   try {
     const res = await fetch(`/api/tenant/${encodeURIComponent(slug)}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...(writeKey ? { "x-write-key": writeKey } : {}) },
       body: JSON.stringify(obj),
     });
     return res.ok;
@@ -2362,6 +2362,7 @@ export default function App() {
   const [platformSession, setPlatformSession] = useState(null);
   const [activeCompany, setActiveCompany] = useState(null);
   const [tenantData, setTenantData] = useState(null);
+  const [tenantWriteKey, setTenantWriteKey] = useState(null);
   const [companySession, setCompanySession] = useState(null);
   const [initialCode] = useState(() => {
     try {
@@ -2411,23 +2412,27 @@ export default function App() {
     setCompanySession(null);
     const res = await apiGetTenant(company.slug);
     if (res) {
-      setTenantData(res);
+      const { _writeKey, ...rest } = res;
+      setTenantWriteKey(_writeKey || null);
+      setTenantData(rest);
     } else {
       const seed = { ...defaultData(), businessName: company.name };
       setTenantData(seed);
-      await apiSetTenant(company.slug, seed);
+      setTenantWriteKey(null);
+      await apiSetTenant(company.slug, seed, null);
     }
     setView("company");
   }
 
   const persistTenant = useCallback(async (next) => {
     setTenantData(next);
-    if (activeCompany) await apiSetTenant(activeCompany.slug, next);
-  }, [activeCompany]);
+    if (activeCompany) await apiSetTenant(activeCompany.slug, next, tenantWriteKey);
+  }, [activeCompany, tenantWriteKey]);
 
   function leaveCompany() {
     setActiveCompany(null);
     setTenantData(null);
+    setTenantWriteKey(null);
     setCompanySession(null);
     setView("gate");
   }
