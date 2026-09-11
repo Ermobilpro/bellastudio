@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Calendar, Clock, Users, TrendingUp, LogOut,
-  Plus, Check, ChevronLeft, ChevronRight, Scissors, User, Receipt, Printer, MessageCircle, Ban, Trash2, FileText, Package, Wallet,
+  Plus, Check, ChevronLeft, ChevronRight, Scissors, User, Receipt, Printer, MessageCircle, Ban, Trash2, FileText, Package, Wallet, Percent,
 } from "lucide-react";
 
 const LOGO_SRC = "/logo.png";
@@ -1159,6 +1159,7 @@ function AgendaView({ data, persist, employeeId, onlyMine, isAdmin }) {
 
 function TeamManager({ data, persist }) {
   const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
   const [pin, setPin] = useState("");
   const [isAdmin, setIsAdmin] = useState(false);
   const [serviceIds, setServiceIds] = useState([]);
@@ -1167,9 +1168,9 @@ function TeamManager({ data, persist }) {
   async function add() {
     if (!name.trim() || pin.length !== 4) { setError("Escribe el nombre y un PIN de 4 dígitos."); return; }
     if (data.employees.some((e) => e.name.toLowerCase() === name.trim().toLowerCase())) { setError("Ya existe alguien con ese nombre."); return; }
-    const emp = { id: uid(), name: name.trim(), pin, isAdmin, active: true, serviceIds };
+    const emp = { id: uid(), name: name.trim(), phone: phone.trim(), pin, isAdmin, active: true, serviceIds };
     await persist({ ...data, employees: [...data.employees, emp] });
-    setName(""); setPin(""); setIsAdmin(false); setServiceIds([]); setError("");
+    setName(""); setPhone(""); setPin(""); setIsAdmin(false); setServiceIds([]); setError("");
   }
   async function toggleActive(id) {
     await persist({ ...data, employees: data.employees.map((e) => (e.id === id ? { ...e, active: !e.active } : e)) });
@@ -1186,6 +1187,7 @@ function TeamManager({ data, persist }) {
       <h3 className="section-title">Agregar integrante</h3>
       <div className="form-grid">
         <input className="input" placeholder="Nombre" value={name} onChange={(e) => setName(e.target.value)} />
+        <input className="input" placeholder="Teléfono (para WhatsApp)" value={phone} onChange={(e) => setPhone(e.target.value)} />
         <input className="input" placeholder="PIN de 4 dígitos" maxLength={4} value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} />
       </div>
       <div className="checkbox-row">
@@ -1209,6 +1211,7 @@ function TeamManager({ data, persist }) {
             <div>
               <div className="appt-service">{e.name}{e.isAdmin && <span className="tag tag-admin">admin</span>}</div>
               <div className="appt-meta">
+                {e.phone ? `${e.phone} · ` : ""}
                 {e.serviceIds.map((sid) => data.services.find((s) => s.id === sid)?.name).filter(Boolean).join(", ") || "Sin servicios asignados"}
               </div>
             </div>
@@ -1824,6 +1827,124 @@ function GastosManager({ data, persist }) {
   );
 }
 
+function ComisionesManager({ data, persist, businessName }) {
+  const [tarifa, setTarifa] = useState(data.comisionDiaria || 20000);
+  const [empleadoId, setEmpleadoId] = useState("");
+  const [rango, setRango] = useState("hoy");
+  const [customStart, setCustomStart] = useState(todayISO());
+  const [customEnd, setCustomEnd] = useState(todayISO());
+
+  async function guardarTarifa(v) {
+    setTarifa(v);
+    await persist({ ...data, comisionDiaria: Number(v) || 0 });
+  }
+
+  const { start, end } = computeRango(rango, customStart, customEnd);
+  const empleado = data.employees.find((e) => e.id === empleadoId);
+
+  const ventasEmp = empleado
+    ? (data.ventas || []).filter((v) => v.status !== "anulada" && v.employeeId === empleado.id && v.date >= start && v.date <= end)
+    : [];
+  const porDia = {};
+  ventasEmp.forEach((v) => { porDia[v.date] = (porDia[v.date] || 0) + v.price; });
+  const diasTrabajados = Object.keys(porDia).length;
+  const totalGenerado = ventasEmp.reduce((s, v) => s + v.price, 0);
+  const comision = diasTrabajados * Number(tarifa || 0);
+  const neto = totalGenerado - comision;
+
+  async function registrarLiquidacion() {
+    if (!empleado) return;
+    const liq = {
+      id: uid(), employeeId: empleado.id, employeeName: empleado.name,
+      desde: start, hasta: end, diasTrabajados, totalGenerado, tarifaDiaria: Number(tarifa || 0),
+      comision, neto, createdAt: Date.now(),
+    };
+    await persist({ ...data, liquidaciones: [...(data.liquidaciones || []), liq] });
+  }
+
+  function enviarWhatsapp() {
+    if (!empleado) return;
+    const phone = (empleado.phone || "").replace(/\D/g, "");
+    if (!phone) { window.alert("Esta trabajadora no tiene teléfono registrado. Agrégalo en la pestaña Equipo."); return; }
+    const msg = `Hola ${empleado.name}, aquí está tu liquidación de ${businessName} del ${start} al ${end}:\n\nDías trabajados: ${diasTrabajados}\nTotal generado: ${money(totalGenerado)}\nComisión (${diasTrabajados} × ${money(tarifa)}): ${money(comision)}\n\nNeto a pagar: ${money(neto)}\n\n¡Gracias por tu trabajo!`;
+    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, "_blank");
+  }
+
+  const liquidacionesEmp = empleado
+    ? (data.liquidaciones || []).filter((l) => l.employeeId === empleado.id).sort((a, b) => b.createdAt - a.createdAt)
+    : [];
+
+  return (
+    <>
+      <div className="panel">
+        <h3 className="section-title">Comisión por día trabajado</h3>
+        <div className="form-grid">
+          <input className="input" type="number" placeholder="Tarifa diaria" value={tarifa} onChange={(e) => guardarTarifa(e.target.value)} />
+          <select className="input" value={empleadoId} onChange={(e) => setEmpleadoId(e.target.value)}>
+            <option value="">Elige una trabajadora</option>
+            {data.employees.filter((e) => e.active).map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+          </select>
+        </div>
+        <div className="filter-row">
+          {[["hoy", "Diario"], ["semana", "Semanal"], ["custom", "Rango personalizado"]].map(([k, l]) => (
+            <button key={k} className={`chip ${rango === k ? "chip-active" : ""}`} onClick={() => setRango(k)}>{l}</button>
+          ))}
+        </div>
+        {rango === "custom" && (
+          <div className="form-grid" style={{ maxWidth: 420 }}>
+            <input className="input" type="date" value={customStart} onChange={(e) => setCustomStart(e.target.value)} />
+            <input className="input" type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} />
+          </div>
+        )}
+        {!empleado && <p className="muted">Elige una trabajadora para calcular su liquidación.</p>}
+      </div>
+
+      {empleado && (
+        <div className="panel" style={{ marginTop: "1.5rem" }}>
+          <h3 className="section-title">{empleado.name} · {start} a {end}</h3>
+          <div className="stat-grid">
+            <div className="stat-card"><div className="stat-num">{diasTrabajados}</div><div className="stat-label">Días trabajados</div></div>
+            <div className="stat-card"><div className="stat-num">{money(totalGenerado)}</div><div className="stat-label">Total generado</div></div>
+            <div className="stat-card"><div className="stat-num">{money(comision)}</div><div className="stat-label">Comisión</div></div>
+            <div className="stat-card"><div className="stat-num">{money(neto)}</div><div className="stat-label">Neto a liquidar</div></div>
+          </div>
+          <h4 className="report-sub" style={{ marginTop: "1.2rem" }}>Detalle por día</h4>
+          <div className="appt-list">
+            {Object.entries(porDia).map(([fecha, total]) => (
+              <div key={fecha} className="appt-row">
+                <div className="appt-service">{fecha}</div>
+                <span className="muted">{money(total)}</span>
+              </div>
+            ))}
+            {diasTrabajados === 0 && <p className="muted">Sin ventas en este rango.</p>}
+          </div>
+          <div className="row-gap" style={{ marginTop: "1.2rem" }}>
+            <button className="btn-ghost" onClick={enviarWhatsapp}><MessageCircle size={15} /> Enviar por WhatsApp</button>
+            <button className="btn-primary" onClick={registrarLiquidacion}><Check size={15} /> Registrar liquidación</button>
+          </div>
+        </div>
+      )}
+
+      {empleado && liquidacionesEmp.length > 0 && (
+        <div className="panel" style={{ marginTop: "1.5rem" }}>
+          <h3 className="section-title">Historial de liquidaciones</h3>
+          <div className="appt-list">
+            {liquidacionesEmp.map((l) => (
+              <div key={l.id} className="appt-row">
+                <div>
+                  <div className="appt-service">{l.desde} a {l.hasta}</div>
+                  <div className="appt-meta">{l.diasTrabajados} días · comisión {money(l.comision)}</div>
+                </div>
+                <span className="tag tag-confirmada">Neto {money(l.neto)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 function TeamApp({ data, persist, session, onLogout }) {
   const me = data.employees.find((e) => e.id === session.id);
   const [tab, setTab] = useState("agenda");
@@ -1837,6 +1958,7 @@ function TeamApp({ data, persist, session, onLogout }) {
       { key: "servicios", label: "Servicios", icon: Scissors },
       { key: "inventario", label: "Inventario", icon: Package },
       { key: "gastos", label: "Gastos", icon: Wallet },
+      { key: "comisiones", label: "Comisiones", icon: Percent },
       { key: "estadisticas", label: "Estadísticas", icon: TrendingUp },
     );
   }
@@ -1855,6 +1977,7 @@ function TeamApp({ data, persist, session, onLogout }) {
       {tab === "servicios" && me?.isAdmin && <ServicesManager data={data} persist={persist} />}
       {tab === "inventario" && me?.isAdmin && <InventarioManager data={data} persist={persist} />}
       {tab === "gastos" && me?.isAdmin && <GastosManager data={data} persist={persist} />}
+      {tab === "comisiones" && me?.isAdmin && <ComisionesManager data={data} persist={persist} businessName={data.businessName} />}
       {tab === "estadisticas" && me?.isAdmin && <StatsView data={data} />}
     </Shell>
   );
