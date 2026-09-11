@@ -4,33 +4,49 @@ import path from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DATA_FILE = path.join(__dirname, "data.json");
+const DATA_DIR = path.join(__dirname, "data");
+const COMPANIES_FILE = path.join(DATA_DIR, "companies.json");
 
-const app = express();
-app.use(express.json({ limit: "2mb" }));
+if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
-function readData() {
-  if (!fs.existsSync(DATA_FILE)) return null;
+function readJSON(file) {
+  if (!fs.existsSync(file)) return null;
   try {
-    return JSON.parse(fs.readFileSync(DATA_FILE, "utf-8"));
+    return JSON.parse(fs.readFileSync(file, "utf-8"));
   } catch {
     return null;
   }
 }
-function writeData(obj) {
-  fs.writeFileSync(DATA_FILE, JSON.stringify(obj));
+function writeJSON(file, obj) {
+  fs.writeFileSync(file, JSON.stringify(obj));
+}
+function tenantFile(slug) {
+  const safe = String(slug).toLowerCase().replace(/[^a-z0-9-]/g, "");
+  return path.join(DATA_DIR, `tenant-${safe}.json`);
 }
 
-// La app entera comparte un único documento (igual que el almacenamiento
-// compartido que usaba dentro de Claude): { businessName, services, employees, clients, appointments }
-app.get("/api/data", (req, res) => {
-  const data = readData();
+const app = express();
+app.use(express.json({ limit: "2mb" }));
+
+// Registro de empresas de la plataforma (nombre, código, vigencia, admin de plataforma)
+app.get("/api/companies", (req, res) => {
+  const reg = readJSON(COMPANIES_FILE);
+  if (!reg) return res.status(404).json(null);
+  res.json(reg);
+});
+app.post("/api/companies", (req, res) => {
+  writeJSON(COMPANIES_FILE, req.body);
+  res.json({ ok: true });
+});
+
+// Datos operativos propios de cada empresa (clientas, equipo, servicios, citas)
+app.get("/api/tenant/:slug", (req, res) => {
+  const data = readJSON(tenantFile(req.params.slug));
   if (!data) return res.status(404).json(null);
   res.json(data);
 });
-
-app.post("/api/data", (req, res) => {
-  writeData(req.body);
+app.post("/api/tenant/:slug", (req, res) => {
+  writeJSON(tenantFile(req.params.slug), req.body);
   res.json({ ok: true });
 });
 
