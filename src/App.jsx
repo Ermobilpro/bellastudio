@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Calendar, Clock, Users, TrendingUp, LogOut,
-  Plus, Check, ChevronLeft, ChevronRight, Scissors, User, Receipt, Printer, MessageCircle, Ban, Trash2,
+  Plus, Check, ChevronLeft, ChevronRight, Scissors, User, Receipt, Printer, MessageCircle, Ban, Trash2, FileText,
 } from "lucide-react";
 
 const LOGO_SRC = "/logo.png";
@@ -392,6 +392,8 @@ html, body, #root{ height:100%; margin:0; padding:0; }
 .summary-item{ font-size:.85rem; color:var(--muted); }
 .summary-item strong{ display:block; font-family:Georgia,serif; font-size:1.25rem; color:var(--ink); }
 .consec{ font-family:Georgia,serif; font-weight:600; color:var(--gold); margin-right:.4rem; }
+.report-head{ text-align:center; margin-bottom:1.1rem; }
+.report-sub{ font-size:.95rem; font-weight:800; margin:0 0 .6rem; }
 .modal-overlay{ position:fixed; inset:0; background:rgba(46,20,33,.45); display:flex; align-items:center; justify-content:center; z-index:80; padding:1rem; }
 .modal-card{ background:var(--paper); border-radius:18px; padding:1.7rem; max-width:380px; width:100%; box-shadow:var(--shadow); max-height:90vh; overflow:auto; }
 .receipt{ text-align:center; }
@@ -402,8 +404,8 @@ html, body, #root{ height:100%; margin:0; padding:0; }
 
 @media print {
   body *{ visibility:hidden; }
-  #receipt-print, #receipt-print *{ visibility:visible; }
-  #receipt-print{ position:absolute; top:0; left:0; width:100%; padding:2rem; }
+  .print-area, .print-area *{ visibility:visible; }
+  .print-area{ position:absolute; top:0; left:0; width:100%; padding:2rem; }
   .no-print{ display:none !important; }
 }
 
@@ -1249,7 +1251,7 @@ function VentaReceipt({ venta, businessName, onClose }) {
   return (
     <div className="modal-overlay no-print" onClick={onClose}>
       <div className="modal-card" onClick={(e) => e.stopPropagation()}>
-        <div id="receipt-print" className="receipt">
+        <div className="receipt print-area">
           <h3>{businessName}</h3>
           <p className="receipt-num">Comprobante de servicio N.° {venta.consecutivo}</p>
           <hr />
@@ -1331,6 +1333,110 @@ function VentasManager({ data, persist, businessName }) {
   );
 }
 
+function computeRango(rango, customStart, customEnd) {
+  const today = todayISO();
+  if (rango === "hoy") return { start: today, end: today };
+  if (rango === "semana") {
+    const t = new Date();
+    const start = new Date(t);
+    start.setDate(t.getDate() - t.getDay());
+    const end = new Date(start);
+    end.setDate(start.getDate() + 6);
+    return { start: toISO(start), end: toISO(end) };
+  }
+  if (rango === "mes") {
+    const t = new Date();
+    const start = new Date(t.getFullYear(), t.getMonth(), 1);
+    const end = new Date(t.getFullYear(), t.getMonth() + 1, 0);
+    return { start: toISO(start), end: toISO(end) };
+  }
+  return { start: customStart || today, end: customEnd || today };
+}
+
+function ReportesView({ data, businessName }) {
+  const [rango, setRango] = useState("hoy");
+  const [customStart, setCustomStart] = useState(todayISO());
+  const [customEnd, setCustomEnd] = useState(todayISO());
+
+  const { start, end } = computeRango(rango, customStart, customEnd);
+  const ventas = (data.ventas || []).filter((v) => v.status !== "anulada" && v.date >= start && v.date <= end);
+  const total = ventas.reduce((s, v) => s + v.price, 0);
+
+  const porServicio = {};
+  ventas.forEach((v) => {
+    porServicio[v.serviceName] = porServicio[v.serviceName] || { count: 0, total: 0 };
+    porServicio[v.serviceName].count++;
+    porServicio[v.serviceName].total += v.price;
+  });
+
+  const porTrabajadora = {};
+  ventas.forEach((v) => {
+    porTrabajadora[v.employeeName] = porTrabajadora[v.employeeName] || { count: 0, total: 0 };
+    porTrabajadora[v.employeeName].count++;
+    porTrabajadora[v.employeeName].total += v.price;
+  });
+
+  const rangoLabel =
+    rango === "hoy" ? `Diario · ${start}` :
+    rango === "semana" ? `Semanal · ${start} a ${end}` :
+    rango === "mes" ? `Mensual · ${start} a ${end}` :
+    `${start} a ${end}`;
+
+  return (
+    <div className="panel">
+      <h3 className="section-title">Reportes</h3>
+      <div className="filter-row no-print">
+        {[["hoy", "Diario"], ["semana", "Semanal"], ["mes", "Mensual"], ["custom", "Rango personalizado"]].map(([k, l]) => (
+          <button key={k} className={`chip ${rango === k ? "chip-active" : ""}`} onClick={() => setRango(k)}>{l}</button>
+        ))}
+      </div>
+      {rango === "custom" && (
+        <div className="form-grid no-print" style={{ maxWidth: 420 }}>
+          <input className="input" type="date" value={customStart} onChange={(e) => setCustomStart(e.target.value)} />
+          <input className="input" type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} />
+        </div>
+      )}
+
+      <div className="print-area">
+        <div className="report-head">
+          <h3>{businessName}</h3>
+          <p className="muted">Reporte de ventas · {rangoLabel}</p>
+        </div>
+        <div className="summary-bar">
+          <div className="summary-item">Ventas<strong>{ventas.length}</strong></div>
+          <div className="summary-item">Total facturado<strong>{money(total)}</strong></div>
+        </div>
+
+        <h4 className="report-sub">Por servicio</h4>
+        <div className="appt-list">
+          {Object.entries(porServicio).map(([name, v]) => (
+            <div key={name} className="appt-row">
+              <div className="appt-service">{name}</div>
+              <div className="appt-right"><span className="muted">{v.count} · {money(v.total)}</span></div>
+            </div>
+          ))}
+          {Object.keys(porServicio).length === 0 && <p className="muted">Sin ventas en este rango.</p>}
+        </div>
+
+        <h4 className="report-sub" style={{ marginTop: "1.5rem" }}>Por trabajadora</h4>
+        <div className="appt-list">
+          {Object.entries(porTrabajadora).map(([name, v]) => (
+            <div key={name} className="appt-row">
+              <div className="appt-service">{name}</div>
+              <div className="appt-right"><span className="muted">{v.count} servicios · {money(v.total)}</span></div>
+            </div>
+          ))}
+          {Object.keys(porTrabajadora).length === 0 && <p className="muted">Sin ventas en este rango.</p>}
+        </div>
+      </div>
+
+      <button className="btn-primary no-print" style={{ marginTop: "1.3rem" }} onClick={() => window.print()}>
+        <Printer size={15} /> Imprimir reporte
+      </button>
+    </div>
+  );
+}
+
 function TeamApp({ data, persist, session, onLogout }) {
   const me = data.employees.find((e) => e.id === session.id);
   const [tab, setTab] = useState("agenda");
@@ -1339,6 +1445,7 @@ function TeamApp({ data, persist, session, onLogout }) {
     navItems.push(
       { key: "citas", label: "Todas las citas", icon: Clock },
       { key: "ventas", label: "Ventas", icon: Receipt },
+      { key: "reportes", label: "Reportes", icon: FileText },
       { key: "equipo", label: "Equipo", icon: Users },
       { key: "servicios", label: "Servicios", icon: Scissors },
       { key: "estadisticas", label: "Estadísticas", icon: TrendingUp },
@@ -1354,6 +1461,7 @@ function TeamApp({ data, persist, session, onLogout }) {
       {tab === "agenda" && <AgendaView data={data} persist={persist} employeeId={me.id} onlyMine />}
       {tab === "citas" && me?.isAdmin && <AgendaView data={data} persist={persist} onlyMine={false} />}
       {tab === "ventas" && me?.isAdmin && <VentasManager data={data} persist={persist} businessName={data.businessName} />}
+      {tab === "reportes" && me?.isAdmin && <ReportesView data={data} businessName={data.businessName} />}
       {tab === "equipo" && me?.isAdmin && <TeamManager data={data} persist={persist} />}
       {tab === "servicios" && me?.isAdmin && <ServicesManager data={data} persist={persist} />}
       {tab === "estadisticas" && me?.isAdmin && <StatsView data={data} />}
