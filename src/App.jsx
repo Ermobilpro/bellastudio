@@ -42,30 +42,72 @@ function defaultData() {
   };
 }
 
-/* ------------------------- API propia (reemplaza window.storage) ------------------------- */
+/* ------------------------- API propia (plataforma + empresas) ------------------------- */
 
-async function apiGet() {
+async function apiGetCompanies() {
   try {
-    const res = await fetch("/api/data");
+    const res = await fetch("/api/companies");
     if (!res.ok) return null;
-    const json = await res.json();
-    if (!json) return null;
-    return { value: JSON.stringify(json) };
+    return await res.json();
   } catch {
     return null;
   }
 }
-async function apiSet(valueString) {
+async function apiSetCompanies(obj) {
   try {
-    const res = await fetch("/api/data", {
+    const res = await fetch("/api/companies", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: valueString,
+      body: JSON.stringify(obj),
     });
     return res.ok;
   } catch {
     return false;
   }
+}
+async function apiGetTenant(slug) {
+  try {
+    const res = await fetch(`/api/tenant/${encodeURIComponent(slug)}`);
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+async function apiSetTenant(slug, obj) {
+  try {
+    const res = await fetch(`/api/tenant/${encodeURIComponent(slug)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(obj),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+function defaultRegistry() {
+  return { platformAdmin: null, companies: [] };
+}
+
+function slugify(s) {
+  return String(s)
+    .toLowerCase()
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+}
+
+function vigenciaStatus(company) {
+  const today = todayISO();
+  if (!company.vigenciaFin) return "sin-fin";
+  if (today > company.vigenciaFin) return "vencida";
+  const diffDays = Math.round((fromISO(company.vigenciaFin) - fromISO(today)) / 86400000);
+  if (diffDays <= 7) return "por-vencer";
+  return "activa";
 }
 
 /* ---------------------------------- Estilos ---------------------------------- */
@@ -520,7 +562,7 @@ function TeamAuthFields({ data, onAuth }) {
   );
 }
 
-function AuthScreen({ data, businessName, onClientAuth, onTeamAuth }) {
+function AuthScreen({ data, businessName, onClientAuth, onTeamAuth, onLeaveCompany }) {
   const [mode, setMode] = useState("elegir");
 
   if (mode === "cliente") {
@@ -574,6 +616,11 @@ function AuthScreen({ data, businessName, onClientAuth, onTeamAuth }) {
             </div>
           </button>
         </div>
+        {onLeaveCompany && (
+          <button className="back-link" style={{ marginTop: "1.4rem" }} type="button" onClick={onLeaveCompany}>
+            &larr; No es mi empresa, cambiar código
+          </button>
+        )}
       </div>
       <div className="hero-card" aria-label="Tarjeta de servicios de belleza">
         <div className="hero-photo"><img src={LOGO_SRC} alt="BellaStudio" /></div>
@@ -1087,42 +1134,268 @@ function TeamApp({ data, persist, session, onLogout }) {
   );
 }
 
+/* ---------------------------------- Puerta de entrada (código de empresa) ---------------------------------- */
+
+function CompanyGate({ registry, onEnter, onPlatform }) {
+  const [code, setCode] = useState("");
+  const [status, setStatus] = useState(null);
+  const [expiredInfo, setExpiredInfo] = useState(null);
+
+  function submit() {
+    const slug = slugify(code);
+    if (!slug) return;
+    const company = (registry.companies || []).find((c) => c.slug === slug);
+    if (!company) { setStatus("not-found"); return; }
+    if (vigenciaStatus(company) === "vencida") {
+      setStatus("expired");
+      setExpiredInfo(company);
+      return;
+    }
+    setStatus(null);
+    onEnter(company);
+  }
+
+  return (
+    <div className="hero">
+      <div className="hero-decor" aria-hidden="true" />
+      <div className="hero-copy">
+        <div className="brand-label">
+          <span className="brand-photo"><img src={LOGO_SRC} alt="" /></span>
+          BellaStudio
+        </div>
+        <h1>Tu talento,<br />bien agendado.</h1>
+        <p>Escribe el código de tu empresa para entrar a tu espacio.</p>
+        <div className="form-grid-1" style={{ maxWidth: 360 }}>
+          <input
+            className="input" placeholder="Código de tu empresa" value={code}
+            onChange={(e) => { setCode(e.target.value); setStatus(null); }}
+            onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
+          />
+          {status === "not-found" && <p className="error-text">No encontramos una empresa con ese código.</p>}
+          {status === "expired" && (
+            <p className="error-text">
+              La vigencia de {expiredInfo?.name} venció el {expiredInfo?.vigenciaFin}. Contacta a la administradora de la plataforma para renovarla.
+            </p>
+          )}
+          <button className="btn-primary" onClick={submit}>Entrar</button>
+        </div>
+        <button className="back-link" style={{ marginTop: "1.4rem" }} type="button" onClick={onPlatform}>
+          ¿Administras la plataforma? Entra aquí
+        </button>
+      </div>
+      <div className="hero-card" aria-label="Tarjeta de servicios de belleza">
+        <div className="hero-photo"><img src={LOGO_SRC} alt="BellaStudio" /></div>
+        <strong>Manos que cuentan historias</strong>
+        <span>Uñas · Keratina · Cuidado personal</span>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------------------------- Plataforma (super administración) ---------------------------------- */
+
+function PlatformAuthFields({ registry, onAuth }) {
+  const hasAdmin = !!registry.platformAdmin;
+  const [name, setName] = useState("");
+  const [pin, setPin] = useState("");
+  const [error, setError] = useState("");
+
+  function setup() {
+    if (!name.trim() || pin.length !== 4) { setError("Escribe tu nombre y un PIN de 4 dígitos."); return; }
+    onAuth({ name: name.trim(), pin }, true);
+  }
+  function login() {
+    if (
+      registry.platformAdmin &&
+      registry.platformAdmin.name.toLowerCase() === name.trim().toLowerCase() &&
+      registry.platformAdmin.pin === pin
+    ) {
+      onAuth(registry.platformAdmin, false);
+    } else {
+      setError("Nombre o PIN incorrectos.");
+    }
+  }
+
+  if (!hasAdmin) {
+    return (
+      <>
+        <h3 className="form-title">Configura la plataforma</h3>
+        <p className="form-sub">Esta cuenta va a poder crear y administrar todas las empresas.</p>
+        <div className="form-grid-1">
+          <input className="input" placeholder="Tu nombre" value={name} onChange={(e) => setName(e.target.value)} />
+          <input className="input" placeholder="Crea un PIN de 4 dígitos" maxLength={4} value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} />
+          {error && <p className="error-text">{error}</p>}
+          <button className="btn-primary" onClick={setup}>Crear cuenta y entrar</button>
+        </div>
+      </>
+    );
+  }
+  return (
+    <>
+      <h3 className="form-title">Panel de plataforma</h3>
+      <p className="form-sub">Administra las empresas que usan BellaStudio.</p>
+      <div className="form-grid-1">
+        <input className="input" placeholder="Tu nombre" value={name} onChange={(e) => setName(e.target.value)} />
+        <input className="input" placeholder="PIN de 4 dígitos" maxLength={4} value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} />
+        {error && <p className="error-text">{error}</p>}
+        <button className="btn-primary" onClick={login}>Entrar</button>
+      </div>
+    </>
+  );
+}
+
+function PlatformAdmin({ registry, persistRegistry, onEnterCompany, onLogout }) {
+  const [name, setName] = useState("");
+  const [slug, setSlug] = useState("");
+  const [inicio, setInicio] = useState(todayISO());
+  const [fin, setFin] = useState("");
+  const [error, setError] = useState("");
+
+  async function createCompany() {
+    const finalSlug = slugify(slug.trim() ? slug : name);
+    if (!name.trim() || !finalSlug || !fin) { setError("Completa nombre, código y fecha de vencimiento."); return; }
+    if ((registry.companies || []).some((c) => c.slug === finalSlug)) { setError("Ya existe una empresa con ese código."); return; }
+    const company = { id: uid(), slug: finalSlug, name: name.trim(), vigenciaInicio: inicio, vigenciaFin: fin, createdAt: Date.now() };
+    await persistRegistry({ ...registry, companies: [...(registry.companies || []), company] });
+    const seed = { ...defaultData(), businessName: name.trim() };
+    await apiSetTenant(finalSlug, seed);
+    setName(""); setSlug(""); setFin(""); setError("");
+  }
+
+  async function renovar(company) {
+    const nueva = window.prompt(`Nueva fecha de vencimiento para ${company.name} (AAAA-MM-DD):`, company.vigenciaFin || "");
+    if (!nueva) return;
+    await persistRegistry({
+      ...registry,
+      companies: registry.companies.map((c) => (c.id === company.id ? { ...c, vigenciaFin: nueva } : c)),
+    });
+  }
+
+  async function removeCompany(company) {
+    await persistRegistry({ ...registry, companies: registry.companies.filter((c) => c.id !== company.id) });
+  }
+
+  const statusLabel = { activa: "Activa", "por-vencer": "Por vencer", vencida: "Vencida", "sin-fin": "Sin fecha" };
+  const statusTag = { activa: "tag-confirmada", "por-vencer": "tag-completada", vencida: "tag-cancelada", "sin-fin": "tag-admin" };
+
+  return (
+    <Shell
+      title="BellaStudio"
+      personName={registry.platformAdmin?.name?.split(" ")[0] || ""}
+      roleLabel="Plataforma"
+      nav={[{ key: "empresas", label: "Empresas", icon: Users }]}
+      active="empresas" onNav={() => {}} onLogout={onLogout}
+    >
+      <div className="panel">
+        <h3 className="section-title">Nueva empresa</h3>
+        <div className="form-grid">
+          <input className="input" placeholder="Nombre de la empresa" value={name} onChange={(e) => setName(e.target.value)} />
+          <input className="input" placeholder="Código (opcional, se genera solo)" value={slug} onChange={(e) => setSlug(e.target.value)} />
+          <input className="input" type="date" value={inicio} onChange={(e) => setInicio(e.target.value)} />
+          <input className="input" type="date" value={fin} onChange={(e) => setFin(e.target.value)} />
+        </div>
+        {error && <p className="error-text">{error}</p>}
+        <button className="btn-primary" onClick={createCompany}><Plus size={15} /> Crear empresa</button>
+      </div>
+
+      <div className="panel" style={{ marginTop: "1.5rem" }}>
+        <h3 className="section-title">Empresas</h3>
+        {(registry.companies || []).length === 0 && <p className="muted">Todavía no has creado ninguna empresa.</p>}
+        <div className="appt-list">
+          {(registry.companies || []).map((c) => {
+            const st = vigenciaStatus(c);
+            return (
+              <div key={c.id} className="appt-row">
+                <div>
+                  <div className="appt-service">{c.name} <span className="muted">· {c.slug}</span></div>
+                  <div className="appt-meta">Vigente {c.vigenciaInicio} → {c.vigenciaFin || "sin definir"}</div>
+                </div>
+                <div className="appt-right">
+                  <span className={`tag ${statusTag[st]}`}>{statusLabel[st]}</span>
+                  <button className="btn-ghost" onClick={() => onEnterCompany(c)}>Entrar</button>
+                  <button className="btn-ghost" onClick={() => renovar(c)}>Renovar</button>
+                  <button className="btn-ghost-danger" onClick={() => removeCompany(c)}>Eliminar</button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </Shell>
+  );
+}
+
 /* ---------------------------------- App raíz ---------------------------------- */
 
 export default function App() {
-  const [data, setData] = useState(null);
+  const [registry, setRegistry] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [session, setSession] = useState(null);
+  const [view, setView] = useState("gate"); // 'gate' | 'platform-auth' | 'platform-admin' | 'company'
+  const [platformSession, setPlatformSession] = useState(null);
+  const [activeCompany, setActiveCompany] = useState(null);
+  const [tenantData, setTenantData] = useState(null);
+  const [companySession, setCompanySession] = useState(null);
 
   useEffect(() => {
     (async () => {
-      const res = await apiGet();
-      if (res && res.value) {
-        try { setData(JSON.parse(res.value)); } catch (e) { setData(defaultData()); }
+      const res = await apiGetCompanies();
+      if (res) {
+        setRegistry(res);
       } else {
-        const seed = defaultData();
-        setData(seed);
-        await apiSet(JSON.stringify(seed));
+        const seed = defaultRegistry();
+        setRegistry(seed);
+        await apiSetCompanies(seed);
       }
       setLoading(false);
     })();
   }, []);
 
-  const persist = useCallback(async (next) => {
-    setData(next);
-    await apiSet(JSON.stringify(next));
+  const persistRegistry = useCallback(async (next) => {
+    setRegistry(next);
+    await apiSetCompanies(next);
   }, []);
 
-  async function handleClientAuth(client, isNew) {
-    if (isNew) await persist({ ...data, clients: [...data.clients, client] });
-    setSession({ type: "cliente", id: client.id });
-  }
-  async function handleTeamAuth(emp, isNew) {
-    if (isNew) await persist({ ...data, employees: [...data.employees, emp] });
-    setSession({ type: "empleado", id: emp.id });
+  async function enterCompany(company) {
+    setActiveCompany(company);
+    setCompanySession(null);
+    const res = await apiGetTenant(company.slug);
+    if (res) {
+      setTenantData(res);
+    } else {
+      const seed = { ...defaultData(), businessName: company.name };
+      setTenantData(seed);
+      await apiSetTenant(company.slug, seed);
+    }
+    setView("company");
   }
 
-  if (loading || !data) {
+  const persistTenant = useCallback(async (next) => {
+    setTenantData(next);
+    if (activeCompany) await apiSetTenant(activeCompany.slug, next);
+  }, [activeCompany]);
+
+  function leaveCompany() {
+    setActiveCompany(null);
+    setTenantData(null);
+    setCompanySession(null);
+    setView("gate");
+  }
+
+  async function handleClientAuth(client, isNew) {
+    if (isNew) await persistTenant({ ...tenantData, clients: [...tenantData.clients, client] });
+    setCompanySession({ type: "cliente", id: client.id });
+  }
+  async function handleTeamAuth(emp, isNew) {
+    if (isNew) await persistTenant({ ...tenantData, employees: [...tenantData.employees, emp] });
+    setCompanySession({ type: "empleado", id: emp.id });
+  }
+  async function handlePlatformAuth(admin, isNew) {
+    if (isNew) await persistRegistry({ ...registry, platformAdmin: admin });
+    setPlatformSession(admin);
+    setView("platform-admin");
+  }
+
+  if (loading || !registry) {
     return (
       <div className="app-shell loading">
         <style>{CSS}</style>
@@ -1134,14 +1407,45 @@ export default function App() {
   return (
     <div className="app-shell">
       <style>{CSS}</style>
-      {!session && (
-        <AuthScreen data={data} businessName={data.businessName} onClientAuth={handleClientAuth} onTeamAuth={handleTeamAuth} />
+
+      {view === "gate" && (
+        <CompanyGate registry={registry} onEnter={enterCompany} onPlatform={() => setView("platform-auth")} />
       )}
-      {session?.type === "cliente" && (
-        <ClientApp data={data} persist={persist} session={session} onLogout={() => setSession(null)} />
+
+      {view === "platform-auth" && (
+        <LoginSplit
+          eyebrow="Plataforma"
+          title={<>Todas tus<br />empresas,<br />en un lugar.</>}
+          quote="Cada empresa que activas es un espacio de trabajo completo, con su propia información."
+          onBack={() => setView("gate")}
+        >
+          <PlatformAuthFields registry={registry} onAuth={handlePlatformAuth} />
+        </LoginSplit>
       )}
-      {session?.type === "empleado" && (
-        <TeamApp data={data} persist={persist} session={session} onLogout={() => setSession(null)} />
+
+      {view === "platform-admin" && platformSession && (
+        <PlatformAdmin
+          registry={registry}
+          persistRegistry={persistRegistry}
+          onEnterCompany={enterCompany}
+          onLogout={() => { setPlatformSession(null); setView("gate"); }}
+        />
+      )}
+
+      {view === "company" && tenantData && !companySession && (
+        <AuthScreen
+          data={tenantData}
+          businessName={tenantData.businessName}
+          onClientAuth={handleClientAuth}
+          onTeamAuth={handleTeamAuth}
+          onLeaveCompany={leaveCompany}
+        />
+      )}
+      {view === "company" && tenantData && companySession?.type === "cliente" && (
+        <ClientApp data={tenantData} persist={persistTenant} session={companySession} onLogout={() => setCompanySession(null)} />
+      )}
+      {view === "company" && tenantData && companySession?.type === "empleado" && (
+        <TeamApp data={tenantData} persist={persistTenant} session={companySession} onLogout={() => setCompanySession(null)} />
       )}
     </div>
   );
