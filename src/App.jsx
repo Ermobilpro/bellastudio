@@ -332,6 +332,7 @@ html, body, #root{ height:100%; margin:0; padding:0; }
 .slot-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(76px,1fr)); gap:.5rem; max-width:520px; }
 .slot-btn{ background:var(--soft); border:1px solid var(--line); border-radius:999px; padding:.55rem; cursor:pointer; font-family:inherit; font-weight:700; }
 .slot-btn:hover{ border-color:var(--berry); color:var(--berry); }
+.slot-btn-active{ background:var(--berry); color:#fff; border-color:var(--berry); }
 .confirm-box{ max-width:360px; background:var(--soft); border:1px solid var(--line); border-radius:16px; padding:1.2rem; }
 .confirm-box p{ margin:.15rem 0; }
 .row-gap{ display:flex; gap:.6rem; margin-top:1rem; }
@@ -965,6 +966,8 @@ function AgendaView({ data, persist, employeeId, onlyMine, isAdmin }) {
   const [filterEmp, setFilterEmp] = useState("todas");
   const [expandedId, setExpandedId] = useState(null);
   const [addServiceId, setAddServiceId] = useState("");
+  const [reassignId, setReassignId] = useState(null);
+  const [reassignEmp, setReassignEmp] = useState("");
 
   const scoped = data.appointments.filter((a) =>
     onlyMine ? a.employeeId === employeeId : (filterEmp === "todas" || a.employeeId === filterEmp)
@@ -978,6 +981,28 @@ function AgendaView({ data, persist, employeeId, onlyMine, isAdmin }) {
   function employeeName(id) { return data.employees.find((e) => e.id === id)?.name || "—"; }
   function serviceName(sid) { return data.services.find((s) => s.id === sid)?.name || "—"; }
   function apptTotal(a) { return a.price + (a.extras || []).reduce((s, e) => s + e.price, 0); }
+
+  function isFreeFor(empId, dateISO, startMin, duration, excludeApptId) {
+    const end = startMin + duration;
+    return !data.appointments.some((x) => {
+      if (x.id === excludeApptId) return false;
+      if (x.employeeId !== empId || x.date !== dateISO || x.status === "cancelada") return false;
+      const xStart = timeToMin(x.time);
+      const xEnd = xStart + x.duration;
+      return startMin < xEnd && end > xStart;
+    });
+  }
+
+  async function reasignar(a) {
+    if (!reassignEmp) return;
+    if (!isFreeFor(reassignEmp, a.date, timeToMin(a.time), a.duration, a.id)) {
+      window.alert("Esa trabajadora ya tiene una cita a esa hora.");
+      return;
+    }
+    const appointments = data.appointments.map((x) => (x.id === a.id ? { ...x, employeeId: reassignEmp } : x));
+    await persist({ ...data, appointments });
+    setReassignId(null); setReassignEmp("");
+  }
 
   async function setStatus(id, status) {
     let next = { ...data, appointments: data.appointments.map((a) => (a.id === id ? { ...a, status } : a)) };
@@ -1110,6 +1135,11 @@ function AgendaView({ data, persist, employeeId, onlyMine, isAdmin }) {
                         <button className="btn-ghost" onClick={() => setExpandedId(expandedId === a.id ? null : a.id)}>
                           {expandedId === a.id ? "Cerrar" : "+ Servicio"}
                         </button>
+                        {isAdmin && !onlyMine && (
+                          <button className="btn-ghost" onClick={() => { setReassignId(reassignId === a.id ? null : a.id); setReassignEmp(a.employeeId); }}>
+                            {reassignId === a.id ? "Cerrar" : "Reasignar"}
+                          </button>
+                        )}
                         <button className="btn-ghost" onClick={() => setStatus(a.id, "completada")}>Completada</button>
                         <button className="btn-ghost-danger" onClick={() => setStatus(a.id, "cancelada")}>Cancelar</button>
                       </>
@@ -1136,6 +1166,17 @@ function AgendaView({ data, persist, employeeId, onlyMine, isAdmin }) {
                         </div>
                       );
                     })}
+                  </div>
+                )}
+
+                {reassignId === a.id && (
+                  <div style={{ width: "100%", marginTop: ".9rem", paddingTop: ".9rem", borderTop: "1px solid var(--line)", display: "flex", gap: ".5rem", flexWrap: "wrap", alignItems: "center" }}>
+                    <select className="input" style={{ maxWidth: 260 }} value={reassignEmp} onChange={(e) => setReassignEmp(e.target.value)}>
+                      {data.employees.filter((e) => e.active && e.serviceIds.includes(a.serviceId)).map((e) => (
+                        <option key={e.id} value={e.id}>{e.name}</option>
+                      ))}
+                    </select>
+                    <button className="btn-primary" onClick={() => reasignar(a)}>Guardar asignación</button>
                   </div>
                 )}
 
@@ -1945,6 +1986,77 @@ function ComisionesManager({ data, persist, businessName }) {
   );
 }
 
+function NuevaCitaAdmin({ data, persist }) {
+  const [clientId, setClientId] = useState("");
+  const [serviceId, setServiceId] = useState("");
+  const [employeeId, setEmployeeId] = useState("");
+  const [date, setDate] = useState(todayISO());
+  const [time, setTime] = useState("");
+  const [error, setError] = useState("");
+
+  const service = data.services.find((s) => s.id === serviceId);
+  const eligibleEmployees = data.employees.filter((e) => e.active && e.serviceIds.includes(serviceId));
+
+  function isFreeFor(empId, dateISO, startMin, duration) {
+    const end = startMin + duration;
+    return !data.appointments.some((x) => {
+      if (x.employeeId !== empId || x.date !== dateISO || x.status === "cancelada") return false;
+      const xStart = timeToMin(x.time);
+      const xEnd = xStart + x.duration;
+      return startMin < xEnd && end > xStart;
+    });
+  }
+
+  const slots = [];
+  if (service && employeeId) {
+    for (let m = OPEN_START_MIN; m + service.duration <= OPEN_END_MIN; m += SLOT_STEP_MIN) {
+      if (isFreeFor(employeeId, date, m, service.duration)) slots.push(minToTime(m));
+    }
+  }
+
+  async function crear() {
+    if (!clientId || !service || !employeeId || !time) { setError("Completa la clienta, el servicio, la trabajadora y la hora."); return; }
+    const appt = {
+      id: uid(), clientId, employeeId, serviceId,
+      serviceName: service.name, price: service.price, duration: service.duration,
+      date, time, status: "confirmada", createdAt: Date.now(),
+    };
+    await persist({ ...data, appointments: [...data.appointments, appt] });
+    setClientId(""); setServiceId(""); setEmployeeId(""); setTime(""); setError("");
+  }
+
+  return (
+    <div className="panel" style={{ marginBottom: "1.5rem" }}>
+      <h3 className="section-title">Asignar nueva cita</h3>
+      <div className="form-grid">
+        <select className="input" value={clientId} onChange={(e) => setClientId(e.target.value)}>
+          <option value="">Elige una clienta</option>
+          {data.clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+        <select className="input" value={serviceId} onChange={(e) => { setServiceId(e.target.value); setEmployeeId(""); setTime(""); }}>
+          <option value="">Elige un servicio</option>
+          {data.services.map((s) => <option key={s.id} value={s.id}>{s.name} · {money(s.price)}</option>)}
+        </select>
+        <select className="input" value={employeeId} onChange={(e) => { setEmployeeId(e.target.value); setTime(""); }} disabled={!serviceId}>
+          <option value="">Elige una trabajadora</option>
+          {eligibleEmployees.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+        </select>
+        <input className="input" type="date" value={date} min={todayISO()} onChange={(e) => { setDate(e.target.value); setTime(""); }} />
+      </div>
+      {employeeId && service && (
+        <div className="slot-grid" style={{ marginBottom: ".9rem" }}>
+          {slots.map((t) => (
+            <button key={t} className={`slot-btn ${time === t ? "slot-btn-active" : ""}`} onClick={() => setTime(t)}>{t}</button>
+          ))}
+          {slots.length === 0 && <p className="muted">Sin horarios libres ese día para esa trabajadora.</p>}
+        </div>
+      )}
+      {error && <p className="error-text">{error}</p>}
+      <button className="btn-primary" onClick={crear}><Plus size={15} /> Asignar cita</button>
+    </div>
+  );
+}
+
 function TeamApp({ data, persist, session, onLogout }) {
   const me = data.employees.find((e) => e.id === session.id);
   const [tab, setTab] = useState("agenda");
@@ -1970,7 +2082,12 @@ function TeamApp({ data, persist, session, onLogout }) {
       nav={navItems} active={tab} onNav={setTab} onLogout={onLogout}
     >
       {tab === "agenda" && <AgendaView data={data} persist={persist} employeeId={me.id} onlyMine isAdmin={!!me?.isAdmin} />}
-      {tab === "citas" && me?.isAdmin && <AgendaView data={data} persist={persist} onlyMine={false} isAdmin />}
+      {tab === "citas" && me?.isAdmin && (
+        <>
+          <NuevaCitaAdmin data={data} persist={persist} />
+          <AgendaView data={data} persist={persist} onlyMine={false} isAdmin />
+        </>
+      )}
       {tab === "ventas" && me?.isAdmin && <VentasManager data={data} persist={persist} businessName={data.businessName} />}
       {tab === "reportes" && me?.isAdmin && <ReportesView data={data} businessName={data.businessName} />}
       {tab === "equipo" && me?.isAdmin && <TeamManager data={data} persist={persist} />}
