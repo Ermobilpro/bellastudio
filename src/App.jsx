@@ -424,16 +424,20 @@ html, body, #root{ height:100%; margin:0; padding:0; }
   .login-box{ grid-template-columns:1fr; }
   .login-art{ display:none; }
   .shell{ flex-direction:column; }
-  .sidebar{ width:100%; flex-direction:row; align-items:center; flex-wrap:wrap; gap:.6rem; padding:.9rem; }
+  .sidebar{ width:100%; flex-direction:row; align-items:center; flex-wrap:wrap; gap:.5rem; padding:.9rem; }
   .side-primary{ display:none; }
-  .side-nav{ flex-direction:row; flex-wrap:wrap; flex:1; }
+  .side-nav{ flex-direction:row; flex-wrap:wrap; flex:1; gap:.4rem; }
+  .side-link{ padding:.85rem; border-radius:12px; }
   .side-link span{ display:none; }
-  .side-logout{ margin-top:0; }
+  .side-link svg, .side-logout svg{ width:23px; height:23px; }
+  .side-logout{ margin-top:0; padding:.85rem; }
+  .brand-photo{ width:36px; height:36px; }
+  .avatar{ width:38px; height:38px; font-size:1rem; }
   .main{ padding:1.1rem; }
   .two-col{ grid-template-columns:1fr; }
   .form-grid{ grid-template-columns:1fr; }
   .stat-grid{ grid-template-columns:repeat(2,1fr); }
-  .appbar{ padding:0 1rem; }
+  .appbar{ padding:0 1rem; height:64px; }
   .profile span{ display:none; }
 }
 `;
@@ -1220,7 +1224,25 @@ function TeamManager({ data, persist }) {
   async function toggleActive(id) {
     await persist({ ...data, employees: data.employees.map((e) => (e.id === id ? { ...e, active: !e.active } : e)) });
   }
+  async function toggleRole(target) {
+    if (target.isAdmin) {
+      const otrasAdmins = data.employees.filter((e) => e.isAdmin && e.id !== target.id).length;
+      if (otrasAdmins === 0) {
+        window.alert("No puedes quitarle el rol de administradora: es la única que queda. Primero haz administradora a alguien más.");
+        return;
+      }
+    }
+    await persist({ ...data, employees: data.employees.map((e) => (e.id === target.id ? { ...e, isAdmin: !e.isAdmin } : e)) });
+  }
   async function remove(id) {
+    const target = data.employees.find((e) => e.id === id);
+    if (target?.isAdmin) {
+      const otrasAdmins = data.employees.filter((e) => e.isAdmin && e.id !== id).length;
+      if (otrasAdmins === 0) {
+        window.alert("No puedes eliminar a la única administradora. Primero haz administradora a alguien más.");
+        return;
+      }
+    }
     await persist({ ...data, employees: data.employees.filter((e) => e.id !== id) });
   }
   function toggleService(sid) {
@@ -1262,6 +1284,7 @@ function TeamManager({ data, persist }) {
             </div>
             <div className="appt-right">
               <span className={`tag ${e.active ? "tag-confirmada" : "tag-cancelada"}`}>{e.active ? "activa" : "inactiva"}</span>
+              <button className="btn-ghost" onClick={() => toggleRole(e)}>{e.isAdmin ? "Quitar admin" : "Hacer administradora"}</button>
               <button className="btn-ghost" onClick={() => toggleActive(e.id)}>{e.active ? "Desactivar" : "Activar"}</button>
               <button className="btn-ghost-danger" onClick={() => remove(e.id)}>Eliminar</button>
             </div>
