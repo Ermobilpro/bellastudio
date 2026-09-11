@@ -1799,12 +1799,29 @@ function GastosManager({ data, persist }) {
 
   const now = new Date();
   const y = now.getFullYear(), m = now.getMonth();
-  const gastosMes = (data.gastos || []).filter((g) => { const d = fromISO(g.fecha); return d.getFullYear() === y && d.getMonth() === m; });
-  const totalGastos = gastosMes.reduce((s, g) => s + g.monto, 0);
+  const enEsteMes = (fechaISO) => { const d = fromISO(fechaISO); return d.getFullYear() === y && d.getMonth() === m; };
 
-  const ventasMes = (data.ventas || []).filter((v) => v.status !== "anulada" && (() => { const d = fromISO(v.date); return d.getFullYear() === y && d.getMonth() === m; })());
-  const totalIngresos = ventasMes.reduce((s, v) => s + v.price, 0);
-  const utilidadNeta = totalIngresos - totalGastos;
+  const gastosMes = (data.gastos || []).filter((g) => enEsteMes(g.fecha));
+  const totalGastosManuales = gastosMes.reduce((s, g) => s + g.monto, 0);
+
+  const ventasMes = (data.ventas || []).filter((v) => v.status !== "anulada" && enEsteMes(v.date));
+  const totalIngresosServicios = ventasMes.reduce((s, v) => s + v.price, 0);
+
+  const ventasEquipoMes = (data.ventasEquipo || []).filter((v) => v.status !== "anulada" && enEsteMes(v.fecha));
+  const totalVentasEquipo = ventasEquipoMes.reduce((s, v) => s + v.total, 0);
+
+  const comprasMes = (data.compras || []).filter((c) => enEsteMes(c.fecha));
+  const totalCompras = comprasMes.reduce((s, c) => s + c.costoTotal, 0);
+
+  const liquidacionesMes = (data.liquidaciones || []).filter((l) => {
+    const d = new Date(l.createdAt);
+    return d.getFullYear() === y && d.getMonth() === m;
+  });
+  const totalComisiones = liquidacionesMes.reduce((s, l) => s + l.comision, 0);
+
+  const totalIngresos = totalIngresosServicios + totalVentasEquipo;
+  const totalEgresos = totalGastosManuales + totalCompras + totalComisiones;
+  const utilidadNeta = totalIngresos - totalEgresos;
 
   const porTrabajadora = {};
   ventasMes.forEach((v) => { porTrabajadora[v.employeeName] = (porTrabajadora[v.employeeName] || 0) + v.price; });
@@ -1828,13 +1845,20 @@ function GastosManager({ data, persist }) {
       </div>
 
       <div className="panel" style={{ marginTop: "1.5rem" }}>
-        <h3 className="section-title">Este mes ({MONTHS[m]})</h3>
-        <div className="stat-grid">
-          <div className="stat-card"><div className="stat-num">{money(totalIngresos)}</div><div className="stat-label">Ingresos</div></div>
-          <div className="stat-card"><div className="stat-num">{money(totalGastos)}</div><div className="stat-label">Gastos</div></div>
+        <h3 className="section-title">Resumen de {MONTHS[m]}</h3>
+        <div className="appt-list">
+          <div className="appt-row"><div className="appt-service">Ingresos por servicios</div><span className="muted">{money(totalIngresosServicios)}</span></div>
+          <div className="appt-row"><div className="appt-service">Ingresos por ventas al equipo</div><span className="muted">{money(totalVentasEquipo)}</span></div>
+          <div className="appt-row"><div className="appt-service">Compras del mes</div><span className="muted">-{money(totalCompras)}</span></div>
+          <div className="appt-row"><div className="appt-service">Comisiones liquidadas</div><span className="muted">-{money(totalComisiones)}</span></div>
+          <div className="appt-row"><div className="appt-service">Gastos varios</div><span className="muted">-{money(totalGastosManuales)}</span></div>
+        </div>
+        <div className="stat-grid" style={{ marginTop: "1.1rem" }}>
+          <div className="stat-card"><div className="stat-num">{money(totalIngresos)}</div><div className="stat-label">Total ingresos</div></div>
+          <div className="stat-card"><div className="stat-num">{money(totalEgresos)}</div><div className="stat-label">Total egresos</div></div>
           <div className="stat-card"><div className="stat-num">{money(utilidadNeta)}</div><div className="stat-label">Utilidad neta</div></div>
         </div>
-        <h4 className="report-sub" style={{ marginTop: "1.3rem" }}>Ingresos por trabajadora</h4>
+        <h4 className="report-sub" style={{ marginTop: "1.3rem" }}>Ingresos por trabajadora (servicios)</h4>
         <div className="appt-list">
           {Object.entries(porTrabajadora).map(([name, tot]) => (
             <div key={name} className="appt-row">
