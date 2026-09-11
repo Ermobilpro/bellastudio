@@ -83,12 +83,16 @@ async function apiVerifyAdminKey(key) {
   }
 }
 async function apiGetTenant(slug) {
+  // Distingue "la empresa todavía no tiene datos" (404 confirmado) de un error
+  // de red o del servidor, para nunca confundir un fallo de conexión con una
+  // empresa nueva y terminar sembrando datos vacíos encima de datos reales.
   try {
     const res = await fetch(`/api/tenant/${encodeURIComponent(slug)}`);
-    if (!res.ok) return null;
+    if (res.status === 404) return { __notFound: true };
+    if (!res.ok) return { __error: true };
     return await res.json();
   } catch {
-    return null;
+    return { __error: true };
   }
 }
 async function apiSetTenant(slug, obj, writeKey) {
@@ -2411,22 +2415,31 @@ export default function App() {
     setActiveCompany(company);
     setCompanySession(null);
     const res = await apiGetTenant(company.slug);
-    if (res) {
-      const { _writeKey, ...rest } = res;
-      setTenantWriteKey(_writeKey || null);
-      setTenantData(rest);
-    } else {
+    if (res && res.__error) {
+      // No se pudo confirmar si la empresa tiene datos o no: nunca sembrar
+      // encima ante la duda, solo avisar y no continuar.
+      window.alert("No se pudo conectar con el servidor. Verifica tu conexión e intenta de nuevo.");
+      setActiveCompany(null);
+      return;
+    }
+    if (res && res.__notFound) {
       const seed = { ...defaultData(), businessName: company.name };
       setTenantData(seed);
       setTenantWriteKey(null);
       await apiSetTenant(company.slug, seed, null);
+    } else if (res) {
+      const { _writeKey, ...rest } = res;
+      setTenantWriteKey(_writeKey || null);
+      setTenantData(rest);
     }
     setView("company");
   }
 
   const persistTenant = useCallback(async (next) => {
     setTenantData(next);
-    if (activeCompany) await apiSetTenant(activeCompany.slug, next, tenantWriteKey);
+    if (!activeCompany) return false;
+    const ok = await apiSetTenant(activeCompany.slug, next, tenantWriteKey);
+    return ok;
   }, [activeCompany, tenantWriteKey]);
 
   function leaveCompany() {
@@ -2438,11 +2451,25 @@ export default function App() {
   }
 
   async function handleClientAuth(client, isNew) {
-    if (isNew) await persistTenant({ ...tenantData, clients: [...tenantData.clients, client] });
+    if (isNew) {
+      const ok = await persistTenant({ ...tenantData, clients: [...tenantData.clients, client] });
+      if (!ok) {
+        setTenantData(tenantData);
+        window.alert("No se pudo crear tu cuenta: hubo un problema de conexión con el servidor. Intenta de nuevo.");
+        return;
+      }
+    }
     setCompanySession({ type: "cliente", id: client.id });
   }
   async function handleTeamAuth(emp, isNew) {
-    if (isNew) await persistTenant({ ...tenantData, employees: [...tenantData.employees, emp] });
+    if (isNew) {
+      const ok = await persistTenant({ ...tenantData, employees: [...tenantData.employees, emp] });
+      if (!ok) {
+        setTenantData(tenantData);
+        window.alert("No se pudo crear tu cuenta: hubo un problema de conexión con el servidor. Intenta de nuevo.");
+        return;
+      }
+    }
     setCompanySession({ type: "empleado", id: emp.id });
   }
   function handlePlatformAuth(key) {
