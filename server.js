@@ -22,7 +22,17 @@ function readJSON(file) {
   }
 }
 function writeJSON(file, obj) {
-  fs.writeFileSync(file, JSON.stringify(obj));
+  // Escritura atómica: primero a un archivo temporal y luego se renombra sobre
+  // el definitivo (el rename es una operación atómica), para que un cierre o
+  // caída del proceso a mitad de escritura nunca deje un archivo corrupto.
+  // También conserva una copia de respaldo del estado anterior por si algo
+  // sale mal y hay que recuperar datos a mano.
+  const tmp = `${file}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(obj));
+  if (fs.existsSync(file)) {
+    try { fs.copyFileSync(file, `${file}.bak`); } catch { /* no crítico */ }
+  }
+  fs.renameSync(tmp, file);
 }
 function tenantFile(slug) {
   const safe = String(slug).toLowerCase().replace(/[^a-z0-9-]/g, "");
@@ -31,13 +41,21 @@ function tenantFile(slug) {
 function genKey() {
   return crypto.randomBytes(20).toString("hex");
 }
+function safeEqual(a, b) {
+  // Comparación en tiempo constante para que nadie pueda adivinar la clave
+  // midiendo cuánto tarda la respuesta según cuántos caracteres acertó.
+  const bufA = Buffer.from(String(a));
+  const bufB = Buffer.from(String(b));
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
+}
 
 // Protege las acciones de plataforma (crear/editar empresas, borrar datos) con la
 // clave maestra guardada en la variable de entorno ADMIN_KEY de Railway.
 function requireAdminKey(req, res, next) {
   if (!ADMIN_KEY) return res.status(500).json({ error: "ADMIN_KEY no está configurada en el servidor" });
   const provided = req.header("x-admin-key") || "";
-  if (provided !== ADMIN_KEY) return res.status(401).json({ error: "Clave maestra incorrecta" });
+  if (!safeEqual(provided, ADMIN_KEY)) return res.status(401).json({ error: "Clave maestra incorrecta" });
   next();
 }
 
@@ -54,12 +72,18 @@ function setCompanyWriteKey(slug, key) {
 }
 
 const app = express();
-app.use(express.json({ limit: "2mb" }));
+// Límite generoso porque las promociones guardan la imagen dentro del mismo
+// bloque de datos del negocio (junto con clientas, citas, etc. — todo se
+// reenvía completo en cada guardado). El límite anterior (2mb) se podía
+// quedar corto con varias promociones o un negocio con mucho historial.
+// A futuro conviene guardar las imágenes aparte en vez de subir este límite
+// cada vez que se quede corto.
+app.use(express.json({ limit: "10mb" }));
 
 // Verifica la clave maestra desde la pantalla de acceso a la plataforma
 app.post("/api/admin/verify", (req, res) => {
   const key = req.body?.key || "";
-  res.json({ ok: !!ADMIN_KEY && key === ADMIN_KEY });
+  res.json({ ok: !!ADMIN_KEY && safeEqual(key, ADMIN_KEY) });
 });
 
 // Registro de empresas de la plataforma (nombre, código, vigencia)
@@ -102,7 +126,7 @@ app.get("/api/tenant/:slug", (req, res) => {
 app.post("/api/tenant/:slug", (req, res) => {
   const expected = getCompanyWriteKey(req.params.slug);
   const provided = req.header("x-write-key") || "";
-  if (expected && provided !== expected) {
+  if (expected && !safeEqual(provided, expected)) {
     return res.status(401).json({ error: "Clave de escritura inválida" });
   }
   const body = { ...req.body };
