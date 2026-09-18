@@ -1339,6 +1339,13 @@ function TeamManager({ data, persist }) {
   const [serviceIds, setServiceIds] = useState([]);
   const [error, setError] = useState("");
 
+  const [editingId, setEditingId] = useState(null);
+  const [editName, setEditName] = useState("");
+  const [editPhone, setEditPhone] = useState("");
+  const [editPin, setEditPin] = useState("");
+  const [editServiceIds, setEditServiceIds] = useState([]);
+  const [editError, setEditError] = useState("");
+
   async function add() {
     if (!name.trim() || pin.length !== 4) { setError("Escribe el nombre y un PIN de 4 dígitos."); return; }
     if (data.employees.some((e) => e.name.toLowerCase() === name.trim().toLowerCase())) { setError("Ya existe alguien con ese nombre."); return; }
@@ -1369,9 +1376,36 @@ function TeamManager({ data, persist }) {
       }
     }
     await persist({ ...data, employees: data.employees.filter((e) => e.id !== id) });
+    if (editingId === id) setEditingId(null);
   }
   function toggleService(sid) {
     setServiceIds((prev) => (prev.includes(sid) ? prev.filter((x) => x !== sid) : [...prev, sid]));
+  }
+
+  function startEdit(e) {
+    setEditingId(e.id);
+    setEditName(e.name);
+    setEditPhone(e.phone || "");
+    setEditPin(e.pin || "");
+    setEditServiceIds(e.serviceIds || []);
+    setEditError("");
+  }
+  function cancelEdit() {
+    setEditingId(null);
+    setEditError("");
+  }
+  function toggleEditService(sid) {
+    setEditServiceIds((prev) => (prev.includes(sid) ? prev.filter((x) => x !== sid) : [...prev, sid]));
+  }
+  async function saveEdit(target) {
+    if (!editName.trim() || editPin.length !== 4) { setEditError("Escribe el nombre y un PIN de 4 dígitos."); return; }
+    if (data.employees.some((e) => e.id !== target.id && e.name.toLowerCase() === editName.trim().toLowerCase())) {
+      setEditError("Ya existe alguien con ese nombre.");
+      return;
+    }
+    const updated = { ...target, name: editName.trim(), phone: editPhone.trim(), pin: editPin, serviceIds: editServiceIds };
+    await persist({ ...data, employees: data.employees.map((e) => (e.id === target.id ? updated : e)) });
+    setEditingId(null);
   }
 
   return (
@@ -1399,20 +1433,47 @@ function TeamManager({ data, persist }) {
       <h3 className="section-title" style={{ marginTop: "2rem" }}>Equipo actual</h3>
       <div className="appt-list">
         {data.employees.map((e) => (
-          <div key={e.id} className="appt-row">
-            <div>
-              <div className="appt-service">{e.name}{e.isAdmin && <span className="tag tag-admin">admin</span>}</div>
-              <div className="appt-meta">
-                {e.phone ? `${e.phone} · ` : ""}
-                {e.serviceIds.map((sid) => data.services.find((s) => s.id === sid)?.name).filter(Boolean).join(", ") || "Sin servicios asignados"}
+          <div key={e.id} className="appt-row" style={{ flexDirection: "column", alignItems: "stretch" }}>
+            {editingId === e.id ? (
+              <div style={{ width: "100%" }}>
+                <div className="appt-service" style={{ marginBottom: ".5rem" }}>Modificando a {e.name}</div>
+                <div className="form-grid">
+                  <input className="input" placeholder="Nombre" value={editName} onChange={(ev) => setEditName(ev.target.value)} />
+                  <input className="input" placeholder="Teléfono (para WhatsApp)" value={editPhone} onChange={(ev) => setEditPhone(ev.target.value)} />
+                  <input className="input" placeholder="PIN de 4 dígitos" maxLength={4} value={editPin} onChange={(ev) => setEditPin(ev.target.value.replace(/\D/g, ""))} />
+                </div>
+                <p className="field-hint">Servicios que realiza:</p>
+                <div className="chip-row">
+                  {data.services.map((s) => (
+                    <button key={s.id} type="button" className={`chip ${editServiceIds.includes(s.id) ? "chip-active" : ""}`} onClick={() => toggleEditService(s.id)}>
+                      {s.name}
+                    </button>
+                  ))}
+                </div>
+                {editError && <p className="error-text">{editError}</p>}
+                <div style={{ display: "flex", gap: ".6rem" }}>
+                  <button className="btn-primary" onClick={() => saveEdit(e)}>Guardar cambios</button>
+                  <button className="btn-ghost" onClick={cancelEdit}>Cancelar</button>
+                </div>
               </div>
-            </div>
-            <div className="appt-right">
-              <span className={`tag ${e.active ? "tag-confirmada" : "tag-cancelada"}`}>{e.active ? "activa" : "inactiva"}</span>
-              <button className="btn-ghost" onClick={() => toggleRole(e)}>{e.isAdmin ? "Quitar admin" : "Hacer administradora"}</button>
-              <button className="btn-ghost" onClick={() => toggleActive(e.id)}>{e.active ? "Desactivar" : "Activar"}</button>
-              <button className="btn-ghost-danger" onClick={() => remove(e.id)}>Eliminar</button>
-            </div>
+            ) : (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", gap: ".75rem", flexWrap: "wrap" }}>
+                <div>
+                  <div className="appt-service">{e.name}{e.isAdmin && <span className="tag tag-admin">admin</span>}</div>
+                  <div className="appt-meta">
+                    {e.phone ? `${e.phone} · ` : ""}
+                    {e.serviceIds.map((sid) => data.services.find((s) => s.id === sid)?.name).filter(Boolean).join(", ") || "Sin servicios asignados"}
+                  </div>
+                </div>
+                <div className="appt-right">
+                  <span className={`tag ${e.active ? "tag-confirmada" : "tag-cancelada"}`}>{e.active ? "activa" : "inactiva"}</span>
+                  <button className="btn-ghost" onClick={() => startEdit(e)}>Modificar</button>
+                  <button className="btn-ghost" onClick={() => toggleRole(e)}>{e.isAdmin ? "Quitar admin" : "Hacer administradora"}</button>
+                  <button className="btn-ghost" onClick={() => toggleActive(e.id)}>{e.active ? "Desactivar" : "Activar"}</button>
+                  <button className="btn-ghost-danger" onClick={() => remove(e.id)}>Eliminar</button>
+                </div>
+              </div>
+            )}
           </div>
         ))}
       </div>
