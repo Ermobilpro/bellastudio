@@ -1263,16 +1263,20 @@ function AgendaView({ data, persist, employeeId, onlyMine, isAdmin }) {
                     <span className={`tag tag-${a.status}`}>{a.status}</span>
                     {a.status === "confirmada" && (
                       <>
-                        <button className="btn-ghost" onClick={() => setExpandedId(expandedId === a.id ? null : a.id)}>
-                          {expandedId === a.id ? "Cerrar" : "+ Servicio"}
-                        </button>
+                        {isAdmin && (
+                          <button className="btn-ghost" onClick={() => setExpandedId(expandedId === a.id ? null : a.id)}>
+                            {expandedId === a.id ? "Cerrar" : "+ Servicio"}
+                          </button>
+                        )}
                         {isAdmin && !onlyMine && (
                           <button className="btn-ghost" onClick={() => { setReassignId(reassignId === a.id ? null : a.id); setReassignEmp(a.employeeId); }}>
                             {reassignId === a.id ? "Cerrar" : "Reasignar"}
                           </button>
                         )}
                         <button className="btn-ghost" onClick={() => setStatus(a.id, "completada")}>Completada</button>
-                        <button className="btn-ghost-danger" onClick={() => setStatus(a.id, "cancelada")}>Cancelar</button>
+                        {isAdmin && (
+                          <button className="btn-ghost-danger" onClick={() => setStatus(a.id, "cancelada")}>Cancelar</button>
+                        )}
                       </>
                     )}
                   </div>
@@ -1285,13 +1289,11 @@ function AgendaView({ data, persist, employeeId, onlyMine, isAdmin }) {
                       return (
                         <div key={e.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: ".85rem", color: "var(--muted)" }}>
                           <span>+ {e.serviceName} · {money(e.price)}</span>
-                          {a.status === "confirmada" && (
+                          {a.status === "confirmada" && isAdmin && (
                             pend ? (
                               <span className="tag tag-completada">Devolución pendiente</span>
-                            ) : isAdmin ? (
-                              <button className="btn-ghost-danger" onClick={() => eliminarExtraAdmin(a, e)}>Eliminar</button>
                             ) : (
-                              <button className="btn-ghost" onClick={() => solicitarDevolucion(a, e)}>Solicitar eliminar</button>
+                              <button className="btn-ghost-danger" onClick={() => eliminarExtraAdmin(a, e)}>Eliminar</button>
                             )
                           )}
                         </div>
@@ -1311,7 +1313,7 @@ function AgendaView({ data, persist, employeeId, onlyMine, isAdmin }) {
                   </div>
                 )}
 
-                {expandedId === a.id && (
+                {isAdmin && expandedId === a.id && (
                   <div style={{ width: "100%", marginTop: ".9rem", paddingTop: ".9rem", borderTop: "1px solid var(--line)", display: "flex", gap: ".5rem", flexWrap: "wrap", alignItems: "center" }}>
                     <select className="input" style={{ maxWidth: 260 }} value={addServiceId} onChange={(e) => setAddServiceId(e.target.value)}>
                       <option value="">Elige un servicio</option>
