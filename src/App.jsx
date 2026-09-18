@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Calendar, Clock, Users, TrendingUp, LogOut,
-  Plus, Check, ChevronLeft, ChevronRight, Scissors, User, Receipt, Printer, MessageCircle, Ban, Trash2, FileText, Package, Wallet, Percent, Megaphone,
+  Plus, Check, ChevronLeft, ChevronRight, Scissors, User, Receipt, Printer, MessageCircle, Ban, Trash2, FileText, Package, Wallet, Percent, Megaphone, Star, Download,
 } from "lucide-react";
 
 const LOGO_SRC = "/logo.png";
@@ -47,14 +47,59 @@ function defaultData() {
   };
 }
 
-function fileToDataURL(file) {
+function compressImageFile(file, maxDim = 1000, quality = 0.72) {
+  // Redimensiona y comprime la imagen antes de guardarla, para no ir inflando
+  // el tamaño de los datos del negocio con fotos pesadas de celular.
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
     reader.onerror = () => reject(new Error("No se pudo leer el archivo"));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("No se pudo procesar la imagen"));
+      img.onload = () => {
+        let { width, height } = img;
+        if (width > maxDim || height > maxDim) {
+          if (width >= height) { height = Math.round(height * (maxDim / width)); width = maxDim; }
+          else { width = Math.round(width * (maxDim / height)); height = maxDim; }
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = width; canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, width, height);
+        try {
+          resolve(canvas.toDataURL("image/jpeg", quality));
+        } catch {
+          resolve(reader.result);
+        }
+      };
+      img.src = reader.result;
+    };
     reader.readAsDataURL(file);
   });
 }
+
+function employeeWorksOn(emp, dateISO) {
+  // Sin workDays definido (empleadas antiguas) se asume que trabaja todos los días.
+  if (!emp || !Array.isArray(emp.workDays) || emp.workDays.length === 0) return true;
+  return emp.workDays.includes(fromISO(dateISO).getDay());
+}
+
+function exportCSV(filename, headers, rows) {
+  // Genera un archivo CSV (se abre directo en Excel) sin depender de librerías externas.
+  const escape = (v) => {
+    const s = v == null ? "" : String(v);
+    return /[",\n;]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const lines = [headers.map(escape).join(";"), ...rows.map((r) => r.map(escape).join(";"))];
+  const csv = "\uFEFF" + lines.join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 
 /* ------------------------- API propia (plataforma + empresas) ------------------------- */
 
@@ -613,13 +658,18 @@ function LoginSplit({ eyebrow, title, quote, onBack, children }) {
   );
 }
 
-function ClientAuthFields({ data, onAuth }) {
+function ClientAuthFields({ data, persist, onAuth }) {
   const [tab, setTab] = useState("ingresar");
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [pin, setPin] = useState("");
   const [error, setError] = useState("");
+
+  const [recoverPhone, setRecoverPhone] = useState("");
+  const [newPin, setNewPin] = useState("");
+  const [recoverError, setRecoverError] = useState("");
+  const [recoverOk, setRecoverOk] = useState(false);
 
   function register() {
     if (!name.trim() || !email.trim() || pin.length !== 4) {
@@ -638,10 +688,34 @@ function ClientAuthFields({ data, onAuth }) {
     if (!found) { setError("Correo o PIN incorrectos."); return; }
     onAuth(found, false);
   }
+  async function recoverPin() {
+    setRecoverError(""); setRecoverOk(false);
+    if (!email.trim() || !recoverPhone.trim() || newPin.length !== 4) {
+      setRecoverError("Completa tu correo, tu teléfono registrado y un nuevo PIN de 4 dígitos.");
+      return;
+    }
+    const found = data.clients.find(
+      (c) => c.email.toLowerCase() === email.trim().toLowerCase() && (c.phone || "").replace(/\D/g, "") === recoverPhone.replace(/\D/g, "")
+    );
+    if (!found) {
+      setRecoverError("No encontramos una cuenta con ese correo y ese teléfono juntos.");
+      return;
+    }
+    const updated = { ...found, pin: newPin };
+    const ok = await persist({ ...data, clients: data.clients.map((c) => (c.id === found.id ? updated : c)) });
+    if (ok === false) {
+      setRecoverError("No se pudo cambiar el PIN: problema de conexión con el servidor. Intenta de nuevo.");
+      return;
+    }
+    setRecoverOk(true);
+    setPin(""); setRecoverPhone(""); setNewPin("");
+  }
 
   return (
     <>
-      <h3 className="form-title">{tab === "ingresar" ? "Inicia sesión" : "Crea tu cuenta"}</h3>
+      <h3 className="form-title">
+        {tab === "ingresar" ? "Inicia sesión" : tab === "registro" ? "Crea tu cuenta" : "Recupera tu PIN"}
+      </h3>
       <p className="form-sub">Reserva y gestiona tus citas de uñas y keratina en un solo lugar.</p>
       <div className="tab-row">
         <button className={`tab-btn ${tab === "ingresar" ? "tab-btn-active" : ""}`} onClick={() => setTab("ingresar")}>Ingresar</button>
@@ -663,6 +737,28 @@ function ClientAuthFields({ data, onAuth }) {
           <input className="input" placeholder="PIN de 4 dígitos" maxLength={4} value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} />
           {error && <p className="error-text">{error}</p>}
           <button className="btn-primary" onClick={login}>Entrar</button>
+          <button className="back-link" type="button" style={{ marginTop: ".2rem" }} onClick={() => { setRecoverError(""); setRecoverOk(false); setTab("recuperar"); }}>
+            ¿Olvidaste tu PIN?
+          </button>
+        </div>
+      )}
+      {tab === "recuperar" && (
+        <div className="form-grid-1">
+          {recoverOk ? (
+            <>
+              <p className="muted">Tu PIN se actualizó correctamente. Ya puedes ingresar con tu nuevo PIN.</p>
+              <button className="btn-primary" onClick={() => setTab("ingresar")}>Ir a ingresar</button>
+            </>
+          ) : (
+            <>
+              <p className="field-hint">Para confirmar que eres tú, escribe el correo y el teléfono con los que te registraste.</p>
+              <input className="input" placeholder="Correo con el que te registraste" value={email} onChange={(e) => setEmail(e.target.value)} />
+              <input className="input" placeholder="Teléfono con el que te registraste" value={recoverPhone} onChange={(e) => setRecoverPhone(e.target.value)} />
+              <input className="input" placeholder="Nuevo PIN de 4 dígitos" maxLength={4} value={newPin} onChange={(e) => setNewPin(e.target.value.replace(/\D/g, ""))} />
+              {recoverError && <p className="error-text">{recoverError}</p>}
+              <button className="btn-primary" onClick={recoverPin}>Cambiar mi PIN</button>
+            </>
+          )}
         </div>
       )}
     </>
@@ -719,7 +815,7 @@ function TeamAuthFields({ data, onAuth }) {
   );
 }
 
-function AuthScreen({ data, businessName, onClientAuth, onTeamAuth, onLeaveCompany }) {
+function AuthScreen({ data, persist, businessName, onClientAuth, onTeamAuth, onLeaveCompany }) {
   const [mode, setMode] = useState("elegir");
 
   if (mode === "cliente") {
@@ -730,7 +826,7 @@ function AuthScreen({ data, businessName, onClientAuth, onTeamAuth, onLeaveCompa
         quote="Cada cita es una oportunidad para que alguien se sienta espectacular."
         onBack={() => setMode("elegir")}
       >
-        <ClientAuthFields data={data} onAuth={onClientAuth} />
+        <ClientAuthFields data={data} persist={persist} onAuth={onClientAuth} />
       </LoginSplit>
     );
   }
@@ -843,7 +939,7 @@ function BookingWizard({ data, persist, clientId, onBooked, promo, onClearPromo 
     if (!service) return [];
     const out = [];
     for (let m = OPEN_START_MIN; m + service.duration <= OPEN_END_MIN; m += SLOT_STEP_MIN) {
-      const cands = candidatesFor(employeeId).filter((e) => isFree(e.id, dateISO, m, service.duration));
+      const cands = candidatesFor(employeeId).filter((e) => employeeWorksOn(e, dateISO) && isFree(e.id, dateISO, m, service.duration));
       if (cands.length > 0) out.push({ time: minToTime(m), employeeId: cands[0].id, employeeName: cands[0].name });
     }
     return out;
@@ -957,7 +1053,12 @@ function BookingWizard({ data, persist, clientId, onBooked, promo, onClearPromo 
           <MonthCalendar
             year={calYear} month={calMonth} selectedDate={date}
             minDateISO={todayISO()}
-            isDateDisabled={promoServiceOk ? (iso) => !promoDateAllowed(promo, iso) : undefined}
+            isDateDisabled={(iso) => {
+              if (promoServiceOk && !promoDateAllowed(promo, iso)) return true;
+              const pool = candidatesFor(employeeId);
+              if (pool.length > 0 && !pool.some((e) => employeeWorksOn(e, iso))) return true;
+              return false;
+            }}
             onMonthChange={(y, m) => { setCalYear(y); setCalMonth(m); }}
             onSelect={(iso) => { setDate(iso); setSlot(null); setStep(4); }}
           />
@@ -1002,10 +1103,90 @@ function MyAppointments({ data, persist, clientId }) {
   const upcoming = mine.filter((a) => a.date >= now && a.status !== "cancelada");
   const past = mine.filter((a) => a.date < now || a.status === "cancelada");
 
-  async function cancel(id) {
-    await persist({ ...data, appointments: data.appointments.map((a) => (a.id === id ? { ...a, status: "cancelada" } : a)) });
+  const [reagendarId, setReagendarId] = useState(null);
+  const [calYear, setCalYear] = useState(new Date().getFullYear());
+  const [calMonth, setCalMonth] = useState(new Date().getMonth());
+  const [reDate, setReDate] = useState(null);
+
+  const cancelMinHours = data.cancelMinHours != null ? Number(data.cancelMinHours) : 3;
+  const contactPhone = data.employees.find((e) => e.isAdmin && e.phone)?.phone;
+
+  function hoursUntil(a) {
+    const start = fromISO(a.date);
+    const [h, m] = a.time.split(":").map(Number);
+    start.setHours(h, m, 0, 0);
+    return (start.getTime() - Date.now()) / 3600000;
+  }
+
+  async function cancel(a) {
+    if (hoursUntil(a) < cancelMinHours) {
+      window.alert(
+        `Esta cita es en menos de ${cancelMinHours} horas, así que ya no se puede cancelar desde aquí.` +
+        (contactPhone ? ` Escríbenos directamente al ${contactPhone} si de verdad no puedes venir.` : " Contacta directamente al salón si de verdad no puedes venir.")
+      );
+      return;
+    }
+    await persist({ ...data, appointments: data.appointments.map((x) => (x.id === a.id ? { ...x, status: "cancelada" } : x)) });
   }
   function employeeName(id) { return data.employees.find((e) => e.id === id)?.name || "—"; }
+  function serviceDuration(a) { return data.services.find((s) => s.id === a.serviceId)?.duration || a.duration; }
+
+  function isFreeExcluding(empId, dateISO, startMin, duration, excludeId) {
+    const end = startMin + duration;
+    return !data.appointments.some((x) => {
+      if (x.id === excludeId) return false;
+      if (x.employeeId !== empId || x.date !== dateISO || x.status === "cancelada") return false;
+      const xStart = timeToMin(x.time);
+      const xEnd = xStart + x.duration;
+      return startMin < xEnd && end > xStart;
+    });
+  }
+
+  function slotsFor(a, dateISO) {
+    const emp = data.employees.find((e) => e.id === a.employeeId);
+    if (!emp || !employeeWorksOn(emp, dateISO)) return [];
+    const duration = serviceDuration(a);
+    const out = [];
+    for (let m = OPEN_START_MIN; m + duration <= OPEN_END_MIN; m += SLOT_STEP_MIN) {
+      if (isFreeExcluding(a.employeeId, dateISO, m, duration, a.id)) out.push(minToTime(m));
+    }
+    return out;
+  }
+
+  function startReagendar(a) {
+    setReagendarId(a.id);
+    setReDate(null);
+    setCalYear(new Date().getFullYear());
+    setCalMonth(new Date().getMonth());
+  }
+
+  async function confirmarReagendo(a, time) {
+    const ok = await persist({ ...data, appointments: data.appointments.map((x) => (x.id === a.id ? { ...x, date: reDate, time } : x)) });
+    if (ok === false) {
+      window.alert("No se pudo reagendar la cita: problema de conexión con el servidor. Intenta de nuevo.");
+      return;
+    }
+    setReagendarId(null); setReDate(null);
+  }
+
+  const [reviewingId, setReviewingId] = useState(null);
+  const [reviewRating, setReviewRating] = useState(5);
+  const [reviewComment, setReviewComment] = useState("");
+
+  function startReview(a) {
+    setReviewingId(a.id);
+    setReviewRating(5);
+    setReviewComment("");
+  }
+  async function enviarResena(a) {
+    const review = { rating: reviewRating, comment: reviewComment.trim(), createdAt: Date.now() };
+    const ok = await persist({ ...data, appointments: data.appointments.map((x) => (x.id === a.id ? { ...x, review } : x)) });
+    if (ok === false) {
+      window.alert("No se pudo enviar la reseña: problema de conexión con el servidor. Intenta de nuevo.");
+      return;
+    }
+    setReviewingId(null);
+  }
 
   return (
     <div className="panel">
@@ -1013,15 +1194,40 @@ function MyAppointments({ data, persist, clientId }) {
       {upcoming.length === 0 && <p className="muted">No tienes citas próximas. Reserva una desde "Reservar cita".</p>}
       <div className="appt-list">
         {upcoming.map((a) => (
-          <div key={a.id} className="appt-row">
-            <div>
-              <div className="appt-service">{a.serviceName}</div>
-              <div className="appt-meta">{a.date} · {a.time} · con {employeeName(a.employeeId)}</div>
+          <div key={a.id} className="appt-row" style={{ flexDirection: "column", alignItems: "stretch" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: ".75rem", width: "100%" }}>
+              <div>
+                <div className="appt-service">{a.serviceName}</div>
+                <div className="appt-meta">{a.date} · {a.time} · con {employeeName(a.employeeId)}</div>
+              </div>
+              <div className="appt-right">
+                <span className="tag tag-confirmada">{a.status}</span>
+                <button className="btn-ghost" onClick={() => (reagendarId === a.id ? setReagendarId(null) : startReagendar(a))}>
+                  {reagendarId === a.id ? "Cerrar" : "Reagendar"}
+                </button>
+                <button className="btn-ghost-danger" onClick={() => cancel(a)}>Cancelar</button>
+              </div>
             </div>
-            <div className="appt-right">
-              <span className="tag tag-confirmada">{a.status}</span>
-              <button className="btn-ghost-danger" onClick={() => cancel(a.id)}>Cancelar</button>
-            </div>
+            {reagendarId === a.id && (
+              <div style={{ width: "100%", marginTop: ".9rem", paddingTop: ".9rem", borderTop: "1px solid var(--line)" }}>
+                <p className="field-hint">Elige la nueva fecha (con {employeeName(a.employeeId)}):</p>
+                <MonthCalendar
+                  year={calYear} month={calMonth} selectedDate={reDate}
+                  minDateISO={todayISO()}
+                  isDateDisabled={(iso) => slotsFor(a, iso).length === 0}
+                  onMonthChange={(y, m) => { setCalYear(y); setCalMonth(m); }}
+                  onSelect={(iso) => setReDate(iso)}
+                />
+                {reDate && (
+                  <div className="slot-grid" style={{ marginTop: ".8rem" }}>
+                    {slotsFor(a, reDate).map((t) => (
+                      <button key={t} className="slot-btn" onClick={() => confirmarReagendo(a, t)}>{t}</button>
+                    ))}
+                    {slotsFor(a, reDate).length === 0 && <p className="muted">Sin horarios libres ese día.</p>}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -1031,12 +1237,51 @@ function MyAppointments({ data, persist, clientId }) {
           <h3 className="section-title" style={{ marginTop: "1.75rem" }}>Historial</h3>
           <div className="appt-list">
             {past.map((a) => (
-              <div key={a.id} className="appt-row appt-row-past">
-                <div>
-                  <div className="appt-service">{a.serviceName}</div>
-                  <div className="appt-meta">{a.date} · {a.time} · con {employeeName(a.employeeId)}</div>
+              <div key={a.id} className="appt-row appt-row-past" style={{ flexDirection: "column", alignItems: "stretch" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", gap: ".75rem", flexWrap: "wrap" }}>
+                  <div>
+                    <div className="appt-service">{a.serviceName}</div>
+                    <div className="appt-meta">{a.date} · {a.time} · con {employeeName(a.employeeId)}</div>
+                  </div>
+                  <div className="appt-right">
+                    <span className={`tag tag-${a.status}`}>{a.status}</span>
+                    {a.status === "completada" && !a.review && reviewingId !== a.id && (
+                      <button className="btn-ghost" onClick={() => startReview(a)}><Star size={14} /> Dejar reseña</button>
+                    )}
+                  </div>
                 </div>
-                <span className={`tag tag-${a.status}`}>{a.status}</span>
+                {a.review && (
+                  <div className="appt-meta" style={{ marginTop: ".4rem" }}>
+                    {"★".repeat(a.review.rating)}{"☆".repeat(5 - a.review.rating)}
+                    {a.review.comment ? ` — ${a.review.comment}` : ""}
+                  </div>
+                )}
+                {reviewingId === a.id && (
+                  <div style={{ width: "100%", marginTop: ".8rem", paddingTop: ".8rem", borderTop: "1px solid var(--line)" }}>
+                    <div style={{ display: "flex", gap: ".3rem", marginBottom: ".6rem" }}>
+                      {[1, 2, 3, 4, 5].map((n) => (
+                        <button
+                          key={n} type="button" className="icon-btn"
+                          style={{ color: n <= reviewRating ? "var(--gold)" : "var(--muted)", border: "none" }}
+                          onClick={() => setReviewRating(n)}
+                        >
+                          <Star size={20} fill={n <= reviewRating ? "currentColor" : "none"} />
+                        </button>
+                      ))}
+                    </div>
+                    <textarea
+                      className="textarea"
+                      placeholder="Cuéntanos cómo te fue (opcional)"
+                      value={reviewComment}
+                      onChange={(e) => setReviewComment(e.target.value)}
+                      style={{ marginBottom: ".6rem" }}
+                    />
+                    <div style={{ display: "flex", gap: ".6rem" }}>
+                      <button className="btn-primary" onClick={() => enviarResena(a)}>Enviar reseña</button>
+                      <button className="btn-ghost" onClick={() => setReviewingId(null)}>Cancelar</button>
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -1136,6 +1381,13 @@ function AgendaView({ data, persist, employeeId, onlyMine, isAdmin }) {
   function serviceName(sid) { return data.services.find((s) => s.id === sid)?.name || "—"; }
   function apptTotal(a) { return a.price + (a.extras || []).reduce((s, e) => s + e.price, 0); }
 
+  function enviarRecordatorio(a) {
+    const phone = clientPhone(a.clientId).replace(/\D/g, "");
+    if (!phone) { window.alert("Esta clienta no tiene teléfono registrado."); return; }
+    const msg = `Hola ${clientName(a.clientId)}, te recordamos tu cita de ${serviceName(a.serviceId)} el ${a.date} a las ${a.time} en ${data.businessName}. ¡Te esperamos!`;
+    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, "_blank");
+  }
+
   function isFreeFor(empId, dateISO, startMin, duration, excludeApptId) {
     const end = startMin + duration;
     return !data.appointments.some((x) => {
@@ -1189,6 +1441,17 @@ function AgendaView({ data, persist, employeeId, onlyMine, isAdmin }) {
           status: "activa",
         };
         next = { ...next, ventas: [...(data.ventas || []), venta], nextConsecutivo: consecutivo + 1 };
+
+        const rate = data.pointsPerThousand != null ? Number(data.pointsPerThousand) : 1;
+        if (rate > 0) {
+          const pointsEarned = Math.floor((total / 1000) * rate);
+          if (pointsEarned > 0) {
+            next = {
+              ...next,
+              clients: next.clients.map((c) => (c.id === appt.clientId ? { ...c, points: (c.points || 0) + pointsEarned } : c)),
+            };
+          }
+        }
       }
     }
     await persist(next);
@@ -1287,6 +1550,9 @@ function AgendaView({ data, persist, employeeId, onlyMine, isAdmin }) {
                             {reassignId === a.id ? "Cerrar" : "Reasignar"}
                           </button>
                         )}
+                        {isAdmin && (
+                          <button className="btn-ghost" onClick={() => enviarRecordatorio(a)}><MessageCircle size={14} /> Recordar</button>
+                        )}
                         <button className="btn-ghost" onClick={() => setStatus(a.id, "completada")}>Completada</button>
                         {isAdmin && (
                           <button className="btn-ghost-danger" onClick={() => setStatus(a.id, "cancelada")}>Cancelar</button>
@@ -1351,6 +1617,7 @@ function TeamManager({ data, persist }) {
   const [pin, setPin] = useState("");
   const [isAdmin, setIsAdmin] = useState(false);
   const [serviceIds, setServiceIds] = useState([]);
+  const [workDays, setWorkDays] = useState([0, 1, 2, 3, 4, 5, 6]);
   const [error, setError] = useState("");
 
   const [editingId, setEditingId] = useState(null);
@@ -1358,14 +1625,15 @@ function TeamManager({ data, persist }) {
   const [editPhone, setEditPhone] = useState("");
   const [editPin, setEditPin] = useState("");
   const [editServiceIds, setEditServiceIds] = useState([]);
+  const [editWorkDays, setEditWorkDays] = useState([0, 1, 2, 3, 4, 5, 6]);
   const [editError, setEditError] = useState("");
 
   async function add() {
     if (!name.trim() || pin.length !== 4) { setError("Escribe el nombre y un PIN de 4 dígitos."); return; }
     if (data.employees.some((e) => e.name.toLowerCase() === name.trim().toLowerCase())) { setError("Ya existe alguien con ese nombre."); return; }
-    const emp = { id: uid(), name: name.trim(), phone: phone.trim(), pin, isAdmin, active: true, serviceIds };
+    const emp = { id: uid(), name: name.trim(), phone: phone.trim(), pin, isAdmin, active: true, serviceIds, workDays };
     await persist({ ...data, employees: [...data.employees, emp] });
-    setName(""); setPhone(""); setPin(""); setIsAdmin(false); setServiceIds([]); setError("");
+    setName(""); setPhone(""); setPin(""); setIsAdmin(false); setServiceIds([]); setWorkDays([0, 1, 2, 3, 4, 5, 6]); setError("");
   }
   async function toggleActive(id) {
     await persist({ ...data, employees: data.employees.map((e) => (e.id === id ? { ...e, active: !e.active } : e)) });
@@ -1395,6 +1663,9 @@ function TeamManager({ data, persist }) {
   function toggleService(sid) {
     setServiceIds((prev) => (prev.includes(sid) ? prev.filter((x) => x !== sid) : [...prev, sid]));
   }
+  function toggleWorkDay(d) {
+    setWorkDays((prev) => (prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d].sort()));
+  }
 
   function startEdit(e) {
     setEditingId(e.id);
@@ -1402,6 +1673,7 @@ function TeamManager({ data, persist }) {
     setEditPhone(e.phone || "");
     setEditPin(e.pin || "");
     setEditServiceIds(e.serviceIds || []);
+    setEditWorkDays(Array.isArray(e.workDays) && e.workDays.length > 0 ? e.workDays : [0, 1, 2, 3, 4, 5, 6]);
     setEditError("");
   }
   function cancelEdit() {
@@ -1411,13 +1683,16 @@ function TeamManager({ data, persist }) {
   function toggleEditService(sid) {
     setEditServiceIds((prev) => (prev.includes(sid) ? prev.filter((x) => x !== sid) : [...prev, sid]));
   }
+  function toggleEditWorkDay(d) {
+    setEditWorkDays((prev) => (prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d].sort()));
+  }
   async function saveEdit(target) {
     if (!editName.trim() || editPin.length !== 4) { setEditError("Escribe el nombre y un PIN de 4 dígitos."); return; }
     if (data.employees.some((e) => e.id !== target.id && e.name.toLowerCase() === editName.trim().toLowerCase())) {
       setEditError("Ya existe alguien con ese nombre.");
       return;
     }
-    const updated = { ...target, name: editName.trim(), phone: editPhone.trim(), pin: editPin, serviceIds: editServiceIds };
+    const updated = { ...target, name: editName.trim(), phone: editPhone.trim(), pin: editPin, serviceIds: editServiceIds, workDays: editWorkDays };
     await persist({ ...data, employees: data.employees.map((e) => (e.id === target.id ? updated : e)) });
     setEditingId(null);
   }
@@ -1438,6 +1713,14 @@ function TeamManager({ data, persist }) {
         {data.services.map((s) => (
           <button key={s.id} type="button" className={`chip ${serviceIds.includes(s.id) ? "chip-active" : ""}`} onClick={() => toggleService(s.id)}>
             {s.name}
+          </button>
+        ))}
+      </div>
+      <p className="field-hint">Días que trabaja:</p>
+      <div className="chip-row">
+        {WEEKDAYS_FULL.map((w, i) => (
+          <button key={w} type="button" className={`chip ${workDays.includes(i) ? "chip-active" : ""}`} onClick={() => toggleWorkDay(i)}>
+            {w}
           </button>
         ))}
       </div>
@@ -1464,6 +1747,21 @@ function TeamManager({ data, persist }) {
                     </button>
                   ))}
                 </div>
+                <p className="field-hint">Días que trabaja:</p>
+                <div className="chip-row">
+                  {WEEKDAYS_FULL.map((w, i) => (
+                    <button key={w} type="button" className={`chip ${editWorkDays.includes(i) ? "chip-active" : ""}`} onClick={() => toggleEditWorkDay(i)}>
+                      {w}
+                    </button>
+                  ))}
+                </div>
+                <div className="chip-row">
+                  {data.services.map((s) => (
+                    <button key={s.id} type="button" className={`chip ${editServiceIds.includes(s.id) ? "chip-active" : ""}`} onClick={() => toggleEditService(s.id)}>
+                      {s.name}
+                    </button>
+                  ))}
+                </div>
                 {editError && <p className="error-text">{editError}</p>}
                 <div style={{ display: "flex", gap: ".6rem" }}>
                   <button className="btn-primary" onClick={() => saveEdit(e)}>Guardar cambios</button>
@@ -1477,6 +1775,9 @@ function TeamManager({ data, persist }) {
                   <div className="appt-meta">
                     {e.phone ? `${e.phone} · ` : ""}
                     {e.serviceIds.map((sid) => data.services.find((s) => s.id === sid)?.name).filter(Boolean).join(", ") || "Sin servicios asignados"}
+                  </div>
+                  <div className="appt-meta">
+                    Trabaja: {Array.isArray(e.workDays) && e.workDays.length > 0 && e.workDays.length < 7 ? e.workDays.slice().sort().map((d) => WEEKDAYS[d]).join(", ") : "Todos los días"}
                   </div>
                 </div>
                 <div className="appt-right">
@@ -1523,6 +1824,19 @@ function ServicesManager({ data, persist }) {
   const [editDescription, setEditDescription] = useState("");
   const [editErrors, setEditErrors] = useState({});
 
+  const [cancelHours, setCancelHours] = useState(data.cancelMinHours != null ? String(data.cancelMinHours) : "3");
+  async function saveCancelHours() {
+    const n = Number(cancelHours);
+    if (isNaN(n) || n < 0) return;
+    await persist({ ...data, cancelMinHours: n });
+  }
+  const [pointsRate, setPointsRate] = useState(data.pointsPerThousand != null ? String(data.pointsPerThousand) : "1");
+  async function savePointsRate() {
+    const n = Number(pointsRate);
+    if (isNaN(n) || n < 0) return;
+    await persist({ ...data, pointsPerThousand: n });
+  }
+
   async function add() {
     const errs = validateServiceFields({ name, duration, price });
     setFieldErrors(errs);
@@ -1561,7 +1875,24 @@ function ServicesManager({ data, persist }) {
   }
 
   return (
-    <div className="panel">
+    <>
+      <div className="panel" style={{ marginBottom: "1.5rem" }}>
+        <h3 className="section-title">Reglas de cancelación</h3>
+        <p className="field-hint">Las clientas no podrán cancelar una cita desde la app si faltan menos de estas horas.</p>
+        <div style={{ display: "flex", gap: ".6rem", alignItems: "center", flexWrap: "wrap" }}>
+          <input className="input" type="number" min="0" style={{ maxWidth: 140 }} value={cancelHours} onChange={(e) => setCancelHours(e.target.value)} />
+          <button className="btn-ghost" onClick={saveCancelHours}>Guardar</button>
+        </div>
+      </div>
+      <div className="panel" style={{ marginBottom: "1.5rem" }}>
+        <h3 className="section-title">Puntos de fidelidad</h3>
+        <p className="field-hint">Puntos que gana una clienta por cada $1.000 en servicios completados (0 para desactivar).</p>
+        <div style={{ display: "flex", gap: ".6rem", alignItems: "center", flexWrap: "wrap" }}>
+          <input className="input" type="number" min="0" step="0.1" style={{ maxWidth: 140 }} value={pointsRate} onChange={(e) => setPointsRate(e.target.value)} />
+          <button className="btn-ghost" onClick={savePointsRate}>Guardar</button>
+        </div>
+      </div>
+      <div className="panel">
       <h3 className="section-title">Agregar servicio</h3>
       <div className="form-grid">
         <div>
@@ -1671,7 +2002,8 @@ function ServicesManager({ data, persist }) {
           </div>
         );
       })}
-    </div>
+      </div>
+    </>
   );
 }
 
@@ -1744,7 +2076,7 @@ function PromotionsManager({ data, persist }) {
     if (!file) return;
     setUploading(true);
     try {
-      const dataUrl = await fileToDataURL(file);
+      const dataUrl = await compressImageFile(file);
       setImageData(dataUrl);
       setFieldErrors((prev) => ({ ...prev, image: undefined }));
     } catch {
@@ -1933,13 +2265,17 @@ function StatsView({ data }) {
 
   const keratinaCount = monthAppts.filter((a) => data.services.find((s) => s.id === a.serviceId)?.category === "Keratina").length;
 
+  const reviewed = data.appointments.filter((a) => a.review);
+  const avgRating = reviewed.length > 0 ? reviewed.reduce((s, a) => s + a.review.rating, 0) / reviewed.length : null;
+  const recentReviews = reviewed.slice().sort((a, b) => b.review.createdAt - a.review.createdAt).slice(0, 5);
+
   const tips = [];
   if (topService) tips.push(`"${topService[0]}" es tu servicio más pedido este mes (${topService[1]} citas). Arma un combo o paquete con otro servicio para subir el ticket promedio.`);
   if (keratinaCount > 0) tips.push(`Tienes ${keratinaCount} citas de keratina este mes. Ofrece un mantenimiento a los 45 días para que esas clientas vuelvan.`);
   if (monthAppts.length > 0 && byWeekday[minDay] < byWeekday[maxDay]) tips.push(`Los ${WEEKDAYS[minDay]} son tus días más tranquilos. Prueba una promoción especial ese día para llenar la agenda.`);
-  if (cancelled > 0) tips.push(`Tuviste ${cancelled} citas canceladas este mes. Un recordatorio por WhatsApp el día anterior suele bajar las cancelaciones.`);
-  if (topClient) tips.push(`${topClient.name} es tu clienta más frecuente. Un programa de puntos o descuento por fidelidad puede fortalecer esa relación y atraer referidos.`);
-  if (completed.length > 0) tips.push(`Pide una reseña en Google después de cada cita completada: es de las formas más baratas de conseguir clientas nuevas.`);
+  if (cancelled > 0) tips.push(`Tuviste ${cancelled} citas canceladas este mes. El botón "Recordar" por WhatsApp en la agenda, un día antes, suele bajar las cancelaciones.`);
+  if (topClient) tips.push(`${topClient.name} es tu clienta más frecuente. Revísala en "Clientas" — ya está acumulando puntos de fidelidad automáticamente.`);
+  if (reviewed.length === 0 && completed.length > 0) tips.push(`Todavía no tienes reseñas. Tus clientas ya pueden dejarlas desde "Mis citas" después de cada cita completada — coméntaselo la próxima vez que vengan.`);
   if (tips.length === 0) tips.push("Aún no hay suficientes citas este mes para sugerencias específicas. Vuelve cuando tengas más historial.");
 
   return (
@@ -1951,6 +2287,26 @@ function StatsView({ data }) {
         <div className="stat-card"><div className="stat-num">{money(revenue)}</div><div className="stat-label">Ingresos (completadas)</div></div>
         <div className="stat-card"><div className="stat-num">{cancelled}</div><div className="stat-label">Cancelaciones</div></div>
       </div>
+
+      <h3 className="section-title" style={{ marginTop: "2rem" }}>Reseñas de clientas</h3>
+      {reviewed.length === 0 && <p className="muted">Todavía no hay reseñas. Aparecerán aquí cuando tus clientas las dejen desde "Mis citas".</p>}
+      {reviewed.length > 0 && (
+        <>
+          <p className="field-hint">Promedio: {avgRating.toFixed(1)} ★ · {reviewed.length} reseña{reviewed.length === 1 ? "" : "s"}</p>
+          <div className="appt-list">
+            {recentReviews.map((a) => (
+              <div key={a.id} className="appt-row">
+                <div>
+                  <div className="appt-service">{"★".repeat(a.review.rating)}{"☆".repeat(5 - a.review.rating)}</div>
+                  {a.review.comment && <div className="appt-meta">"{a.review.comment}"</div>}
+                  <div className="appt-meta">{data.clients.find((c) => c.id === a.clientId)?.name || "—"} · {a.serviceName}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
       <h3 className="section-title" style={{ marginTop: "2rem" }}>Ideas para hacer crecer tu negocio</h3>
       <ul className="tips-list">
         {tips.map((t, i) => <li key={i}>{t}</li>)}
@@ -2051,6 +2407,16 @@ function VentasManager({ data, persist, businessName }) {
         <div className="summary-item">Ventas activas<strong>{activas.length}</strong></div>
         <div className="summary-item">Total facturado<strong>{money(total)}</strong></div>
       </div>
+      <button
+        className="btn-ghost" style={{ marginBottom: "1rem" }}
+        onClick={() => exportCSV(
+          `ventas-${filtro}.csv`,
+          ["Fecha", "N.°", "Clienta", "Servicio", "Trabajadora", "Valor", "Estado"],
+          filtradas.map((v) => [v.date, v.consecutivo, v.clientName, v.serviceName, v.employeeName, v.price, v.status])
+        )}
+      >
+        <Download size={14} /> Descargar Excel (CSV)
+      </button>
       {filtradas.length === 0 && <p className="muted">No hay ventas en este rango. Se generan solas cuando marcas una cita como "Completada" en la agenda.</p>}
       <div className="appt-list">
         {filtradas.map((v) => (
@@ -2173,6 +2539,16 @@ function ReportesView({ data, businessName }) {
 
       <button className="btn-primary no-print" style={{ marginTop: "1.3rem" }} onClick={() => window.print()}>
         <Printer size={15} /> Imprimir reporte
+      </button>
+      <button
+        className="btn-ghost no-print" style={{ marginTop: "1.3rem", marginLeft: ".6rem" }}
+        onClick={() => exportCSV(
+          `reporte-ventas-${start}_a_${end}.csv`,
+          ["Fecha", "N.°", "Clienta", "Servicio", "Trabajadora", "Valor", "Estado"],
+          ventas.map((v) => [v.date, v.consecutivo, v.clientName, v.serviceName, v.employeeName, v.price, v.status])
+        )}
+      >
+        <Download size={15} /> Descargar Excel (CSV)
       </button>
     </div>
   );
@@ -2591,6 +2967,7 @@ function ComisionesManager({ data, persist, businessName }) {
 
 function NuevaCitaAdmin({ data, persist }) {
   const [clientId, setClientId] = useState("");
+  const [clientSearch, setClientSearch] = useState("");
   const [serviceId, setServiceId] = useState("");
   const [employeeId, setEmployeeId] = useState("");
   const [date, setDate] = useState(todayISO());
@@ -2599,6 +2976,12 @@ function NuevaCitaAdmin({ data, persist }) {
 
   const service = data.services.find((s) => s.id === serviceId);
   const eligibleEmployees = data.employees.filter((e) => e.active && e.serviceIds.includes(serviceId));
+  const clientOptions = clientSearch.trim()
+    ? data.clients.filter((c) => {
+        const q = clientSearch.trim().toLowerCase();
+        return c.name.toLowerCase().includes(q) || (c.phone || "").includes(q) || (c.email || "").toLowerCase().includes(q);
+      })
+    : data.clients;
 
   function isFreeFor(empId, dateISO, startMin, duration) {
     const end = startMin + duration;
@@ -2611,7 +2994,9 @@ function NuevaCitaAdmin({ data, persist }) {
   }
 
   const slots = [];
-  if (service && employeeId) {
+  const empSel = data.employees.find((e) => e.id === employeeId);
+  const empWorksThatDay = empSel ? employeeWorksOn(empSel, date) : true;
+  if (service && employeeId && empWorksThatDay) {
     for (let m = OPEN_START_MIN; m + service.duration <= OPEN_END_MIN; m += SLOT_STEP_MIN) {
       if (isFreeFor(employeeId, date, m, service.duration)) slots.push(minToTime(m));
     }
@@ -2636,10 +3021,13 @@ function NuevaCitaAdmin({ data, persist }) {
     <div className="panel" style={{ marginBottom: "1.5rem" }}>
       <h3 className="section-title">Asignar nueva cita</h3>
       <div className="form-grid">
-        <select className="input" value={clientId} onChange={(e) => setClientId(e.target.value)}>
-          <option value="">Elige una clienta</option>
-          {data.clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </select>
+        <div>
+          <input className="input" placeholder="Buscar clienta por nombre o teléfono" value={clientSearch} onChange={(e) => setClientSearch(e.target.value)} style={{ marginBottom: ".4rem" }} />
+          <select className="input" value={clientId} onChange={(e) => setClientId(e.target.value)}>
+            <option value="">Elige una clienta</option>
+            {clientOptions.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </div>
         <select className="input" value={serviceId} onChange={(e) => { setServiceId(e.target.value); setEmployeeId(""); setTime(""); }}>
           <option value="">Elige un servicio</option>
           {data.services.map((s) => <option key={s.id} value={s.id}>{s.name} · {money(s.price)}</option>)}
@@ -2664,6 +3052,116 @@ function NuevaCitaAdmin({ data, persist }) {
   );
 }
 
+function ClientsManager({ data, persist }) {
+  const [search, setSearch] = useState("");
+  const [editingId, setEditingId] = useState(null);
+  const [notesDraft, setNotesDraft] = useState("");
+  const [redeemId, setRedeemId] = useState(null);
+  const [redeemAmount, setRedeemAmount] = useState("");
+
+  const filtered = data.clients.filter((c) => {
+    if (!search.trim()) return true;
+    const q = search.trim().toLowerCase();
+    return c.name.toLowerCase().includes(q) || (c.phone || "").includes(q) || (c.email || "").toLowerCase().includes(q);
+  }).slice().sort((a, b) => a.name.localeCompare(b.name));
+
+  function statsFor(clientId) {
+    const appts = data.appointments.filter((a) => a.clientId === clientId && a.status !== "cancelada");
+    const last = appts.slice().sort((a, b) => (a.date + a.time < b.date + b.time ? 1 : -1))[0];
+    return { count: appts.length, last: last ? `${last.date} · ${last.serviceName}` : null };
+  }
+
+  function startEdit(c) {
+    setEditingId(c.id);
+    setNotesDraft(c.notes || "");
+  }
+  function cancelEdit() {
+    setEditingId(null);
+    setNotesDraft("");
+  }
+  async function saveNotes(c) {
+    const ok = await persist({ ...data, clients: data.clients.map((x) => (x.id === c.id ? { ...x, notes: notesDraft.trim() } : x)) });
+    if (ok === false) {
+      window.alert("No se pudo guardar la nota: problema de conexión con el servidor. Intenta de nuevo.");
+      return;
+    }
+    setEditingId(null);
+  }
+  async function redeem(c) {
+    const n = Number(redeemAmount);
+    if (!n || n <= 0 || n > (c.points || 0)) return;
+    const ok = await persist({ ...data, clients: data.clients.map((x) => (x.id === c.id ? { ...x, points: (x.points || 0) - n } : x)) });
+    if (ok === false) {
+      window.alert("No se pudo canjear los puntos: problema de conexión con el servidor. Intenta de nuevo.");
+      return;
+    }
+    setRedeemId(null); setRedeemAmount("");
+  }
+
+  return (
+    <div className="panel">
+      <h3 className="section-title">Clientas</h3>
+      <input className="input" placeholder="Buscar por nombre, teléfono o correo" value={search} onChange={(e) => setSearch(e.target.value)} style={{ marginBottom: "1rem", maxWidth: 360 }} />
+      {filtered.length === 0 && <p className="muted">No hay clientas que coincidan con la búsqueda.</p>}
+      <div className="appt-list">
+        {filtered.map((c) => {
+          const stats = statsFor(c.id);
+          return (
+            <div key={c.id} className="appt-row" style={{ flexDirection: "column", alignItems: "stretch" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", gap: ".75rem", flexWrap: "wrap" }}>
+                <div>
+                  <div className="appt-service">{c.name}</div>
+                  <div className="appt-meta">
+                    {c.phone ? `${c.phone} · ` : ""}{c.email}
+                  </div>
+                  <div className="appt-meta">
+                    {stats.count} cita{stats.count === 1 ? "" : "s"}{stats.last ? ` · última: ${stats.last}` : ""}
+                    {(c.points || 0) > 0 && <> · <strong>{c.points} pts</strong></>}
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: ".5rem", flexWrap: "wrap" }}>
+                  {(c.points || 0) > 0 && editingId !== c.id && (
+                    <button className="btn-ghost" onClick={() => { if (redeemId === c.id) { setRedeemId(null); } else { setRedeemId(c.id); setRedeemAmount(""); } }}>
+                      {redeemId === c.id ? "Cerrar" : "Canjear puntos"}
+                    </button>
+                  )}
+                  {editingId !== c.id && (
+                    <button className="btn-ghost" onClick={() => startEdit(c)}>{c.notes ? "Editar notas" : "+ Agregar notas"}</button>
+                  )}
+                </div>
+              </div>
+              {c.notes && editingId !== c.id && (
+                <div className="appt-meta" style={{ marginTop: ".5rem", whiteSpace: "pre-wrap" }}>📝 {c.notes}</div>
+              )}
+              {redeemId === c.id && (
+                <div style={{ width: "100%", marginTop: ".8rem", display: "flex", gap: ".6rem", alignItems: "center", flexWrap: "wrap" }}>
+                  <input className="input" type="number" min="1" max={c.points || 0} placeholder={`Máx. ${c.points} pts`} style={{ maxWidth: 160 }} value={redeemAmount} onChange={(e) => setRedeemAmount(e.target.value)} />
+                  <button className="btn-primary" onClick={() => redeem(c)}>Confirmar canje</button>
+                </div>
+              )}
+              {editingId === c.id && (
+                <div style={{ width: "100%", marginTop: ".8rem" }}>
+                  <textarea
+                    className="textarea"
+                    placeholder="Preferencias, alergias, tono favorito, alguna anotación útil…"
+                    value={notesDraft}
+                    onChange={(e) => setNotesDraft(e.target.value)}
+                    style={{ marginBottom: ".6rem" }}
+                  />
+                  <div style={{ display: "flex", gap: ".6rem" }}>
+                    <button className="btn-primary" onClick={() => saveNotes(c)}>Guardar</button>
+                    <button className="btn-ghost" onClick={cancelEdit}>Cancelar</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function TeamApp({ data, persist, session, onLogout }) {
   const me = data.employees.find((e) => e.id === session.id);
   const [tab, setTab] = useState("agenda");
@@ -2671,6 +3169,7 @@ function TeamApp({ data, persist, session, onLogout }) {
   if (me?.isAdmin) {
     navItems.push(
       { key: "citas", label: "Todas las citas", icon: Clock },
+      { key: "clientas", label: "Clientas", icon: User },
       { key: "ventas", label: "Ventas", icon: Receipt },
       { key: "reportes", label: "Reportes", icon: FileText },
       { key: "equipo", label: "Equipo", icon: Users },
@@ -2697,6 +3196,7 @@ function TeamApp({ data, persist, session, onLogout }) {
         </>
       )}
       {tab === "ventas" && me?.isAdmin && <VentasManager data={data} persist={persist} businessName={data.businessName} />}
+      {tab === "clientas" && me?.isAdmin && <ClientsManager data={data} persist={persist} />}
       {tab === "reportes" && me?.isAdmin && <ReportesView data={data} businessName={data.businessName} />}
       {tab === "equipo" && me?.isAdmin && <TeamManager data={data} persist={persist} />}
       {tab === "servicios" && me?.isAdmin && <ServicesManager data={data} persist={persist} />}
@@ -3118,6 +3618,7 @@ export default function App() {
       {view === "company" && tenantData && !companySession && (
         <AuthScreen
           data={tenantData}
+          persist={persistTenant}
           businessName={tenantData.businessName}
           onClientAuth={handleClientAuth}
           onTeamAuth={handleTeamAuth}
