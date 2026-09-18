@@ -840,7 +840,11 @@ function BookingWizard({ data, persist, clientId, onBooked, promo, onClearPromo 
       date, time: slot.time, status: "confirmada", createdAt: Date.now(),
       promoId: promoApplies ? promo.id : null, promoTitle: promoApplies ? promo.title : null,
     };
-    await persist({ ...data, appointments: [...data.appointments, appt] });
+    const ok = await persist({ ...data, appointments: [...data.appointments, appt] });
+    if (ok === false) {
+      window.alert("No se pudo agendar la cita: hubo un problema de conexión con el servidor. Intenta de nuevo.");
+      return;
+    }
     setDone(true);
   }
 
@@ -906,17 +910,20 @@ function BookingWizard({ data, persist, clientId, onBooked, promo, onClearPromo 
         <div>
           <button className="back-link" onClick={() => setStep(1)}>&larr; Cambiar servicio</button>
           <p className="field-hint">Servicio: <strong>{service?.name}</strong>{promoApplies && promo.price != null && <> · {money(promo.price)} (promoción)</>}</p>
-          <div className="option-list">
-            <button className={`option-row ${employeeId === "" ? "option-row-active" : ""}`} onClick={() => { setEmployeeId(""); setStep(3); }}>
-              Cualquiera disponible
-            </button>
-            {eligibleEmployees.map((e) => (
-              <button key={e.id} className={`option-row ${employeeId === e.id ? "option-row-active" : ""}`} onClick={() => { setEmployeeId(e.id); setStep(3); }}>
-                {e.name}
+          {eligibleEmployees.length === 0 ? (
+            <p className="muted">Todavía no hay ninguna profesional asignada a "{service?.name}", por eso no aparecen horarios disponibles. Pídele a la administradora que asigne este servicio a alguien del equipo (en "Equipo → editar profesional").</p>
+          ) : (
+            <div className="option-list">
+              <button className={`option-row ${employeeId === "" ? "option-row-active" : ""}`} onClick={() => { setEmployeeId(""); setStep(3); }}>
+                Cualquiera disponible
               </button>
-            ))}
-            {eligibleEmployees.length === 0 && <p className="muted">Todavía no hay profesionales asignadas a este servicio. Vuelve pronto.</p>}
-          </div>
+              {eligibleEmployees.map((e) => (
+                <button key={e.id} className={`option-row ${employeeId === e.id ? "option-row-active" : ""}`} onClick={() => { setEmployeeId(e.id); setStep(3); }}>
+                  {e.name}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -2540,7 +2547,11 @@ function NuevaCitaAdmin({ data, persist }) {
       serviceName: service.name, price: service.price, duration: service.duration,
       date, time, status: "confirmada", createdAt: Date.now(),
     };
-    await persist({ ...data, appointments: [...data.appointments, appt] });
+    const ok = await persist({ ...data, appointments: [...data.appointments, appt] });
+    if (ok === false) {
+      setError("No se pudo asignar la cita: hubo un problema de conexión con el servidor. Intenta de nuevo.");
+      return;
+    }
     setClientId(""); setServiceId(""); setEmployeeId(""); setTime(""); setError("");
   }
 
@@ -2929,11 +2940,13 @@ export default function App() {
   }
 
   const persistTenant = useCallback(async (next) => {
+    const previous = tenantData;
     setTenantData(next);
     if (!activeCompany) return false;
     const ok = await apiSetTenant(activeCompany.slug, next, tenantWriteKey);
+    if (!ok) setTenantData(previous);
     return ok;
-  }, [activeCompany, tenantWriteKey]);
+  }, [activeCompany, tenantWriteKey, tenantData]);
 
   function leaveCompany() {
     setActiveCompany(null);
