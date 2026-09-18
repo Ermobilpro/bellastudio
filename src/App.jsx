@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Calendar, Clock, Users, TrendingUp, LogOut,
-  Plus, Check, ChevronLeft, ChevronRight, Scissors, User, Receipt, Printer, MessageCircle, Ban, Trash2, FileText, Package, Wallet, Percent,
+  Plus, Check, ChevronLeft, ChevronRight, Scissors, User, Receipt, Printer, MessageCircle, Ban, Trash2, FileText, Package, Wallet, Percent, Megaphone,
 } from "lucide-react";
 
 const LOGO_SRC = "/logo.png";
@@ -42,7 +42,17 @@ function defaultData() {
     employees: [],
     clients: [],
     appointments: [],
+    promotions: [],
   };
+}
+
+function fileToDataURL(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error("No se pudo leer el archivo"));
+    reader.readAsDataURL(file);
+  });
 }
 
 /* ------------------------- API propia (plataforma + empresas) ------------------------- */
@@ -381,6 +391,18 @@ html, body, #root{ height:100%; margin:0; padding:0; }
 .tag-completada{ background:var(--gold-bg); color:var(--gold-ink); }
 .tag-cancelada{ background:var(--danger-bg); color:var(--danger); }
 .tag-admin{ background:var(--lilac-bg); color:var(--lilac); margin-left:.4rem; }
+.tag-inactiva{ background:var(--soft); color:var(--muted); margin-left:.4rem; }
+
+.promo-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:.9rem; }
+.promo-card{ background:var(--soft); border:1px solid var(--line); border-radius:16px; overflow:hidden; display:flex; flex-direction:column; }
+.promo-thumb{ width:100%; aspect-ratio:16/9; object-fit:cover; background:var(--line); display:block; }
+.promo-body{ padding:.85rem .95rem 1rem; }
+.promo-title{ font-weight:800; font-size:.95rem; color:var(--ink); }
+.promo-desc{ font-size:.82rem; color:var(--muted); margin-top:.25rem; white-space:pre-wrap; }
+.promo-actions{ display:flex; gap:.5rem; padding:0 .95rem .9rem; flex-wrap:wrap; }
+.promo-strip{ margin-bottom:1.4rem; }
+.file-input-wrap{ display:flex; flex-direction:column; gap:.35rem; }
+.promo-upload-preview{ width:100%; max-width:280px; border-radius:12px; margin-top:.5rem; display:block; }
 
 /* --- Formularios admin --- */
 .form-grid{ display:grid; grid-template-columns:repeat(2,1fr); gap:.6rem; margin-bottom:.8rem; }
@@ -948,6 +970,27 @@ function MyAppointments({ data, persist, clientId }) {
   );
 }
 
+function ClientPromotions({ promotions }) {
+  const active = (promotions || []).filter((p) => p.active);
+  if (active.length === 0) return null;
+  return (
+    <div className="promo-strip">
+      <h3 className="section-title">Promociones</h3>
+      <div className="promo-grid">
+        {active.map((p) => (
+          <div key={p.id} className="promo-card">
+            {p.image && <img src={p.image} alt={p.title} className="promo-thumb" />}
+            <div className="promo-body">
+              <div className="promo-title">{p.title}</div>
+              {p.description && <div className="promo-desc">{p.description}</div>}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function ClientApp({ data, persist, session, onLogout }) {
   const [tab, setTab] = useState("reservar");
   const client = data.clients.find((c) => c.id === session.id);
@@ -963,6 +1006,7 @@ function ClientApp({ data, persist, session, onLogout }) {
       active={tab} onNav={setTab} onLogout={onLogout}
       primaryAction={{ label: "Nueva cita", onClick: () => setTab("reservar") }}
     >
+      {tab === "reservar" && <ClientPromotions promotions={data.promotions} />}
       {tab === "reservar" && <BookingWizard data={data} persist={persist} clientId={client.id} onBooked={() => setTab("mis-citas")} />}
       {tab === "mis-citas" && <MyAppointments data={data} persist={persist} clientId={client.id} />}
     </Shell>
@@ -1475,6 +1519,113 @@ function ServicesManager({ data, persist }) {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function PromotionsManager({ data, persist }) {
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [imageData, setImageData] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState({});
+  const fileInputRef = useRef(null);
+
+  async function handleFile(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const dataUrl = await fileToDataURL(file);
+      setImageData(dataUrl);
+      setFieldErrors((prev) => ({ ...prev, image: undefined }));
+    } catch {
+      window.alert("No se pudo cargar la imagen. Intenta de nuevo.");
+    }
+    setUploading(false);
+  }
+
+  async function add() {
+    const errs = {};
+    if (!title.trim()) errs.title = "Escribe un título para la promoción.";
+    if (!imageData) errs.image = "Sube una imagen desde tu celular o computador.";
+    setFieldErrors(errs);
+    if (Object.keys(errs).length > 0) return;
+    const promo = {
+      id: uid(),
+      title: title.trim(),
+      description: description.trim(),
+      image: imageData,
+      active: true,
+      createdAt: todayISO(),
+    };
+    await persist({ ...data, promotions: [promo, ...(data.promotions || [])] });
+    setTitle(""); setDescription(""); setImageData(""); setFieldErrors({});
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  async function toggleActive(id) {
+    await persist({
+      ...data,
+      promotions: (data.promotions || []).map((p) => (p.id === id ? { ...p, active: !p.active } : p)),
+    });
+  }
+  async function remove(id) {
+    await persist({ ...data, promotions: (data.promotions || []).filter((p) => p.id !== id) });
+  }
+
+  return (
+    <div className="panel">
+      <h3 className="section-title">Nueva promoción</h3>
+      <p className="field-hint">Solo la administradora puede crear promociones. Se pueden subir desde el celular o el computador, y únicamente las clientas las verán.</p>
+      <div className="form-grid-1">
+        <div>
+          <input
+            className={`input ${fieldErrors.title ? "input-error" : ""}`}
+            placeholder="Título de la promoción"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+          />
+          {fieldErrors.title && <p className="field-error-text">{fieldErrors.title}</p>}
+        </div>
+        <textarea
+          className="textarea"
+          placeholder="Descripción (opcional)"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+        />
+        <div className="file-input-wrap">
+          <input
+            ref={fileInputRef}
+            className={`input ${fieldErrors.image ? "input-error" : ""}`}
+            type="file"
+            accept="image/*"
+            onChange={handleFile}
+          />
+          {fieldErrors.image && <p className="field-error-text">{fieldErrors.image}</p>}
+          {uploading && <p className="muted">Cargando imagen…</p>}
+          {imageData && <img src={imageData} alt="Vista previa" className="promo-upload-preview" />}
+        </div>
+      </div>
+      <button className="btn-primary" style={{ marginTop: ".9rem" }} onClick={add}><Plus size={15} /> Publicar promoción</button>
+
+      <h3 className="section-title" style={{ marginTop: "2rem" }}>Promociones creadas</h3>
+      {(data.promotions || []).length === 0 && <p className="muted">Todavía no has creado ninguna promoción.</p>}
+      <div className="promo-grid">
+        {(data.promotions || []).map((p) => (
+          <div key={p.id} className="promo-card">
+            {p.image && <img src={p.image} alt={p.title} className="promo-thumb" />}
+            <div className="promo-body">
+              <div className="promo-title">{p.title}{!p.active && <span className="tag tag-inactiva">oculta</span>}</div>
+              {p.description && <div className="promo-desc">{p.description}</div>}
+            </div>
+            <div className="promo-actions">
+              <button className="btn-ghost" onClick={() => toggleActive(p.id)}>{p.active ? "Ocultar" : "Mostrar"}</button>
+              <button className="btn-ghost-danger" onClick={() => remove(p.id)}>Eliminar</button>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -2244,6 +2395,7 @@ function TeamApp({ data, persist, session, onLogout }) {
       { key: "reportes", label: "Reportes", icon: FileText },
       { key: "equipo", label: "Equipo", icon: Users },
       { key: "servicios", label: "Servicios", icon: Scissors },
+      { key: "promociones", label: "Promociones", icon: Megaphone },
       { key: "inventario", label: "Inventario", icon: Package },
       { key: "gastos", label: "Gastos", icon: Wallet },
       { key: "comisiones", label: "Comisiones", icon: Percent },
@@ -2268,6 +2420,7 @@ function TeamApp({ data, persist, session, onLogout }) {
       {tab === "reportes" && me?.isAdmin && <ReportesView data={data} businessName={data.businessName} />}
       {tab === "equipo" && me?.isAdmin && <TeamManager data={data} persist={persist} />}
       {tab === "servicios" && me?.isAdmin && <ServicesManager data={data} persist={persist} />}
+      {tab === "promociones" && me?.isAdmin && <PromotionsManager data={data} persist={persist} />}
       {tab === "inventario" && me?.isAdmin && <InventarioManager data={data} persist={persist} />}
       {tab === "gastos" && me?.isAdmin && <GastosManager data={data} persist={persist} />}
       {tab === "comisiones" && me?.isAdmin && <ComisionesManager data={data} persist={persist} businessName={data.businessName} />}
