@@ -1077,6 +1077,7 @@ function ClientPromotions({ promotions, onUsePromo }) {
 function ClientApp({ data, persist, session, onLogout }) {
   const [tab, setTab] = useState("reservar");
   const [activePromo, setActivePromo] = useState(null);
+  const [bookingKey, setBookingKey] = useState(0);
   const client = data.clients.find((c) => c.id === session.id);
   return (
     <Shell
@@ -1088,7 +1089,7 @@ function ClientApp({ data, persist, session, onLogout }) {
         { key: "mis-citas", label: "Mis citas", icon: Clock },
       ]}
       active={tab} onNav={setTab} onLogout={onLogout}
-      primaryAction={{ label: "Nueva cita", onClick: () => { setActivePromo(null); setTab("reservar"); } }}
+      primaryAction={{ label: "Nueva cita", onClick: () => { setActivePromo(null); setTab("reservar"); setBookingKey((k) => k + 1); } }}
     >
       {tab === "reservar" && (
         <ClientPromotions
@@ -1098,6 +1099,7 @@ function ClientApp({ data, persist, session, onLogout }) {
       )}
       {tab === "reservar" && (
         <BookingWizard
+          key={bookingKey}
           data={data} persist={persist} clientId={client.id}
           promo={activePromo}
           onClearPromo={() => setActivePromo(null)}
@@ -2955,14 +2957,31 @@ export default function App() {
     }
   });
 
+  const navStateRef = useRef({ view, companySession, platformSession });
   useEffect(() => {
-    // El botón "Atrás" del navegador no debe sacar a la usuaria de la app —
-    // la app no tiene páginas separadas, así que atrapamos la navegación hacia
-    // atrás y la reemplazamos por quedarnos en el mismo lugar.
+    navStateRef.current = { view, companySession, platformSession };
+  });
+
+  useEffect(() => {
+    // El botón "Atrás" del navegador no debe sacar a la usuaria de la app.
+    // En vez de solo congelarla en la misma pantalla, la regresamos un paso
+    // dentro del programa (cerrar sesión, salir de la empresa, etc.) y solo
+    // cuando ya no hay a dónde volver, se evita salir del todo.
     try {
       window.history.pushState(null, "", window.location.href);
     } catch { /* noop */ }
     function handlePopState() {
+      const { view: v, companySession: cs } = navStateRef.current;
+      if (v === "company" && cs) {
+        setCompanySession(null);
+      } else if (v === "company" && !cs) {
+        leaveCompany();
+      } else if (v === "platform-admin") {
+        setPlatformSession(null);
+        setView("gate");
+      } else if (v === "platform-auth") {
+        setView("gate");
+      }
       try {
         window.history.pushState(null, "", window.location.href);
       } catch { /* noop */ }
