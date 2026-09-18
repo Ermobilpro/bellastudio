@@ -1188,15 +1188,6 @@ function AgendaView({ data, persist, employeeId, onlyMine, isAdmin }) {
     await persist({ ...data, appointments });
   }
 
-  async function solicitarDevolucion(a, extra) {
-    const dev = {
-      id: uid(), appointmentId: a.id, extraId: extra.id, serviceName: extra.serviceName, price: extra.price,
-      employeeId, employeeName: employeeName(employeeId),
-      estado: "pendiente", solicitadaEn: Date.now(),
-    };
-    await persist({ ...data, devoluciones: [...(data.devoluciones || []), dev] });
-  }
-
   async function resolverDevolucion(dev, aprobar) {
     let appointments = data.appointments;
     if (aprobar) {
@@ -1204,7 +1195,7 @@ function AgendaView({ data, persist, employeeId, onlyMine, isAdmin }) {
         x.id === dev.appointmentId ? { ...x, extras: (x.extras || []).filter((e) => e.id !== dev.extraId) } : x
       );
     }
-    const devoluciones = data.devoluciones.map((d) => (d.id === dev.id ? { ...d, estado: aprobar ? "aprobada" : "rechazada" } : d));
+    const devoluciones = (data.devoluciones || []).map((d) => (d.id === dev.id ? { ...d, estado: aprobar ? "aprobada" : "rechazada" } : d));
     await persist({ ...data, appointments, devoluciones });
   }
 
@@ -2011,12 +2002,12 @@ function VentasManager({ data, persist, businessName }) {
   async function anular(venta) {
     const ok = window.confirm(`¿Anular la venta N.° ${venta.consecutivo}? Queda marcada como anulada pero no se borra del historial.`);
     if (!ok) return;
-    await persist({ ...data, ventas: data.ventas.map((v) => (v.id === venta.id ? { ...v, status: "anulada" } : v)) });
+    await persist({ ...data, ventas: (data.ventas || []).map((v) => (v.id === venta.id ? { ...v, status: "anulada" } : v)) });
   }
   async function eliminar(venta) {
     const ok = window.confirm(`¿Eliminar definitivamente la venta N.° ${venta.consecutivo}? Esta acción no se puede deshacer.`);
     if (!ok) return;
-    await persist({ ...data, ventas: data.ventas.filter((v) => v.id !== venta.id) });
+    await persist({ ...data, ventas: (data.ventas || []).filter((v) => v.id !== venta.id) });
   }
   function enviarWhatsapp(venta) {
     const phone = (venta.clientPhone || "").replace(/\D/g, "");
@@ -2226,7 +2217,7 @@ function InventarioManager({ data, persist }) {
       cantidad, precioUnitario, costoUnitario: productoSel.costoUnitario,
       total, utilidad, fecha: todayISO(), createdAt: Date.now(), status: "activa",
     };
-    const productos = data.productos.map((p) => (p.id === productoSel.id ? { ...p, stock: p.stock - cantidad } : p));
+    const productos = (data.productos || []).map((p) => (p.id === productoSel.id ? { ...p, stock: p.stock - cantidad } : p));
     await persist({
       ...data, productos,
       ventasEquipo: [...(data.ventasEquipo || []), ventaEquipo],
@@ -2238,10 +2229,10 @@ function InventarioManager({ data, persist }) {
   async function anularVentaEquipo(v) {
     const ok = window.confirm(`¿Anular esta venta al equipo? Se devuelven ${v.cantidad} unidades al inventario.`);
     if (!ok) return;
-    const productos = data.productos.map((p) => (p.id === v.productId ? { ...p, stock: p.stock + v.cantidad } : p));
+    const productos = (data.productos || []).map((p) => (p.id === v.productId ? { ...p, stock: p.stock + v.cantidad } : p));
     await persist({
       ...data, productos,
-      ventasEquipo: data.ventasEquipo.map((x) => (x.id === v.id ? { ...x, status: "anulada" } : x)),
+      ventasEquipo: (data.ventasEquipo || []).map((x) => (x.id === v.id ? { ...x, status: "anulada" } : x)),
     });
   }
 
@@ -2359,7 +2350,7 @@ function GastosManager({ data, persist }) {
   async function removeGasto(g) {
     const ok = window.confirm(`¿Eliminar el gasto "${g.concepto}"?`);
     if (!ok) return;
-    await persist({ ...data, gastos: data.gastos.filter((x) => x.id !== g.id) });
+    await persist({ ...data, gastos: (data.gastos || []).filter((x) => x.id !== g.id) });
   }
 
   const now = new Date();
