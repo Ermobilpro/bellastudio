@@ -32,12 +32,12 @@ function defaultData() {
   return {
     businessName: "BellaStudio",
     services: [
-      { id: uid(), name: "Manicure clásica", category: "Uñas", duration: 45, price: 25000 },
-      { id: uid(), name: "Manicure semipermanente", category: "Uñas", duration: 60, price: 45000 },
-      { id: uid(), name: "Pedicura spa", category: "Uñas", duration: 60, price: 35000 },
-      { id: uid(), name: "Uñas acrílicas", category: "Uñas", duration: 90, price: 70000 },
-      { id: uid(), name: "Keratina alisadora", category: "Keratina", duration: 180, price: 180000 },
-      { id: uid(), name: "Botox capilar", category: "Keratina", duration: 150, price: 150000 },
+      { id: uid(), name: "Manicure clásica", category: "Uñas", duration: 45, price: 25000, description: "" },
+      { id: uid(), name: "Manicure semipermanente", category: "Uñas", duration: 60, price: 45000, description: "" },
+      { id: uid(), name: "Pedicura spa", category: "Uñas", duration: 60, price: 35000, description: "" },
+      { id: uid(), name: "Uñas acrílicas", category: "Uñas", duration: 90, price: 70000, description: "" },
+      { id: uid(), name: "Keratina alisadora", category: "Keratina", duration: 180, price: 180000, description: "" },
+      { id: uid(), name: "Botox capilar", category: "Keratina", duration: 150, price: 150000, description: "" },
     ],
     employees: [],
     clients: [],
@@ -281,7 +281,11 @@ html, body, #root{ height:100%; margin:0; padding:0; }
 .field-label{ font-size:.78rem; font-weight:700; color:var(--ink); margin:.4rem 0 -.2rem; }
 .input{ width:100%; padding:.68rem .8rem; border:1px solid var(--line); border-radius:11px; font-family:inherit; font-size:.92rem; color:var(--ink); background:var(--paper); }
 .input:focus{ border-color:var(--berry); }
+.input-error{ border-color:var(--danger); background:var(--danger-bg); }
 .error-text{ color:var(--danger); font-size:.85rem; margin:0; }
+.field-error-text{ color:var(--danger); font-size:.78rem; margin:.25rem 0 0; font-weight:700; }
+.textarea{ width:100%; padding:.68rem .8rem; border:1px solid var(--line); border-radius:11px; font-family:inherit; font-size:.92rem; color:var(--ink); background:var(--paper); resize:vertical; min-height:64px; }
+.textarea:focus{ border-color:var(--berry); }
 .muted{ color:var(--muted); font-size:.9rem; }
 .btn-primary{ display:inline-flex; align-items:center; gap:.4rem; justify-content:center; background:var(--berry); color:#fff;
   border:none; border-radius:999px; padding:.75rem 1.4rem; font-weight:700; cursor:pointer; font-family:inherit; font-size:.92rem;
@@ -1295,18 +1299,41 @@ function TeamManager({ data, persist }) {
   );
 }
 
+function validateServiceFields({ name, duration, price }) {
+  // Devuelve solo las claves de los campos que están mal diligenciados,
+  // para poder pintar en rojo justo el campo problemático, no un mensaje genérico.
+  const errs = {};
+  if (name !== undefined && !String(name).trim()) errs.name = "Escribe un nombre.";
+  if (duration === "" || duration === null || duration === undefined || isNaN(Number(duration)) || Number(duration) <= 0) {
+    errs.duration = "La duración debe ser un número mayor a 0.";
+  }
+  if (price === "" || price === null || price === undefined || isNaN(Number(price)) || Number(price) < 0) {
+    errs.price = "El precio debe ser un número igual o mayor a 0.";
+  }
+  return errs;
+}
+
 function ServicesManager({ data, persist }) {
   const [name, setName] = useState("");
   const [category, setCategory] = useState(CATEGORIES[0]);
   const [duration, setDuration] = useState(60);
   const [price, setPrice] = useState(30000);
-  const [error, setError] = useState("");
+  const [description, setDescription] = useState("");
+  const [fieldErrors, setFieldErrors] = useState({});
+
+  const [editingId, setEditingId] = useState(null);
+  const [editDuration, setEditDuration] = useState("");
+  const [editPrice, setEditPrice] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editErrors, setEditErrors] = useState({});
 
   async function add() {
-    if (!name.trim() || Number(duration) <= 0 || Number(price) < 0) { setError("Completa todos los campos."); return; }
-    const s = { id: uid(), name: name.trim(), category, duration: Number(duration), price: Number(price) };
+    const errs = validateServiceFields({ name, duration, price });
+    setFieldErrors(errs);
+    if (Object.keys(errs).length > 0) return;
+    const s = { id: uid(), name: name.trim(), category, duration: Number(duration), price: Number(price), description: description.trim() };
     await persist({ ...data, services: [...data.services, s] });
-    setName(""); setDuration(60); setPrice(30000); setError("");
+    setName(""); setDuration(60); setPrice(30000); setDescription(""); setFieldErrors({});
   }
   async function remove(id) {
     await persist({
@@ -1314,20 +1341,73 @@ function ServicesManager({ data, persist }) {
       services: data.services.filter((s) => s.id !== id),
       employees: data.employees.map((e) => ({ ...e, serviceIds: e.serviceIds.filter((x) => x !== id) })),
     });
+    if (editingId === id) setEditingId(null);
+  }
+
+  function startEdit(s) {
+    setEditingId(s.id);
+    setEditDuration(String(s.duration));
+    setEditPrice(String(s.price));
+    setEditDescription(s.description || "");
+    setEditErrors({});
+  }
+  function cancelEdit() {
+    setEditingId(null);
+    setEditErrors({});
+  }
+  async function saveEdit(s) {
+    const errs = validateServiceFields({ duration: editDuration, price: editPrice });
+    setEditErrors(errs);
+    if (Object.keys(errs).length > 0) return;
+    const updated = { ...s, duration: Number(editDuration), price: Number(editPrice), description: editDescription.trim() };
+    await persist({ ...data, services: data.services.map((x) => (x.id === s.id ? updated : x)) });
+    setEditingId(null);
   }
 
   return (
     <div className="panel">
       <h3 className="section-title">Agregar servicio</h3>
       <div className="form-grid">
-        <input className="input" placeholder="Nombre del servicio" value={name} onChange={(e) => setName(e.target.value)} />
+        <div>
+          <input
+            className={`input ${fieldErrors.name ? "input-error" : ""}`}
+            placeholder="Nombre del servicio"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+          {fieldErrors.name && <p className="field-error-text">{fieldErrors.name}</p>}
+        </div>
         <select className="input" value={category} onChange={(e) => setCategory(e.target.value)}>
           {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
         </select>
-        <input className="input" type="number" placeholder="Duración (min)" value={duration} onChange={(e) => setDuration(e.target.value)} />
-        <input className="input" type="number" placeholder="Precio" value={price} onChange={(e) => setPrice(e.target.value)} />
+        <div>
+          <input
+            className={`input ${fieldErrors.duration ? "input-error" : ""}`}
+            type="number"
+            placeholder="Duración (min)"
+            value={duration}
+            onChange={(e) => setDuration(e.target.value)}
+          />
+          {fieldErrors.duration && <p className="field-error-text">{fieldErrors.duration}</p>}
+        </div>
+        <div>
+          <input
+            className={`input ${fieldErrors.price ? "input-error" : ""}`}
+            type="number"
+            placeholder="Precio"
+            value={price}
+            onChange={(e) => setPrice(e.target.value)}
+          />
+          {fieldErrors.price && <p className="field-error-text">{fieldErrors.price}</p>}
+        </div>
       </div>
-      {error && <p className="error-text">{error}</p>}
+      <textarea
+        className="textarea"
+        placeholder="Descripción del servicio (opcional)"
+        value={description}
+        onChange={(e) => setDescription(e.target.value)}
+        style={{ marginBottom: ".8rem" }}
+      />
       <button className="btn-primary" onClick={add}><Plus size={15} /> Agregar servicio</button>
 
       {CATEGORIES.map((cat) => {
@@ -1338,12 +1418,57 @@ function ServicesManager({ data, persist }) {
             <h3 className="section-title" style={{ marginTop: "2rem" }}>{cat}</h3>
             <div className="appt-list">
               {items.map((s) => (
-                <div key={s.id} className="appt-row">
-                  <div>
-                    <div className="appt-service">{s.name}</div>
-                    <div className="appt-meta">{s.duration} min · {money(s.price)}</div>
-                  </div>
-                  <button className="btn-ghost-danger" onClick={() => remove(s.id)}>Eliminar</button>
+                <div key={s.id} className="appt-row" style={{ flexDirection: "column", alignItems: "stretch" }}>
+                  {editingId === s.id ? (
+                    <div style={{ width: "100%" }}>
+                      <div className="appt-service" style={{ marginBottom: ".5rem" }}>{s.name}</div>
+                      <div className="form-grid">
+                        <div>
+                          <input
+                            className={`input ${editErrors.duration ? "input-error" : ""}`}
+                            type="number"
+                            placeholder="Duración (min)"
+                            value={editDuration}
+                            onChange={(e) => setEditDuration(e.target.value)}
+                          />
+                          {editErrors.duration && <p className="field-error-text">{editErrors.duration}</p>}
+                        </div>
+                        <div>
+                          <input
+                            className={`input ${editErrors.price ? "input-error" : ""}`}
+                            type="number"
+                            placeholder="Precio"
+                            value={editPrice}
+                            onChange={(e) => setEditPrice(e.target.value)}
+                          />
+                          {editErrors.price && <p className="field-error-text">{editErrors.price}</p>}
+                        </div>
+                      </div>
+                      <textarea
+                        className="textarea"
+                        placeholder="Descripción del servicio (opcional)"
+                        value={editDescription}
+                        onChange={(e) => setEditDescription(e.target.value)}
+                        style={{ marginBottom: ".7rem" }}
+                      />
+                      <div style={{ display: "flex", gap: ".6rem" }}>
+                        <button className="btn-primary" onClick={() => saveEdit(s)}>Guardar cambios</button>
+                        <button className="btn-ghost" onClick={cancelEdit}>Cancelar</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", gap: ".75rem", flexWrap: "wrap" }}>
+                      <div>
+                        <div className="appt-service">{s.name}</div>
+                        <div className="appt-meta">{s.duration} min · {money(s.price)}</div>
+                        {s.description && <div className="appt-meta">{s.description}</div>}
+                      </div>
+                      <div style={{ display: "flex", gap: ".5rem" }}>
+                        <button className="btn-ghost" onClick={() => startEdit(s)}>Editar</button>
+                        <button className="btn-ghost-danger" onClick={() => remove(s.id)}>Eliminar</button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
