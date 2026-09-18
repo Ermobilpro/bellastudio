@@ -453,16 +453,37 @@ html, body, #root{ height:100%; margin:0; padding:0; }
   .login-box{ grid-template-columns:1fr; }
   .login-art{ display:none; }
   .shell{ flex-direction:column; }
-  .sidebar{ width:100%; flex-direction:row; align-items:center; flex-wrap:wrap; gap:.5rem; padding:.9rem; }
-  .side-primary{ display:none; }
-  .side-nav{ flex-direction:row; flex-wrap:wrap; flex:1; gap:.4rem; }
-  .side-link{ padding:.85rem; border-radius:12px; }
-  .side-link span{ display:none; }
-  .side-link svg, .side-logout svg{ width:23px; height:23px; }
-  .side-logout{ margin-top:0; padding:.85rem; }
+  .sidebar{
+    position:fixed; left:0; right:0; bottom:0; z-index:40;
+    width:100%; flex-direction:row; align-items:stretch; gap:0;
+    border-right:none; border-top:1px solid var(--line);
+    background:var(--paper);
+    padding:.3rem .3rem calc(.3rem + env(safe-area-inset-bottom, 0px));
+    box-shadow:0 -10px 26px rgba(91,37,67,.16);
+  }
+  .side-primary{
+    position:fixed; right:1rem; bottom:calc(72px + env(safe-area-inset-bottom, 0px)); z-index:41;
+    width:56px; height:56px; padding:0; margin:0; border-radius:50%;
+    background:linear-gradient(150deg,var(--berry),var(--berry-dark));
+    box-shadow:0 12px 24px rgba(91,37,67,.38);
+  }
+  .side-primary span{ display:none; }
+  .side-primary svg{ width:22px; height:22px; }
+  .side-nav{ flex-direction:row; flex:1; gap:.1rem; overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none; }
+  .side-nav::-webkit-scrollbar{ display:none; }
+  .side-link{
+    flex:0 0 auto; min-width:64px; flex-direction:column; justify-content:center; align-items:center; gap:.22rem;
+    padding:.5rem .3rem; border-radius:14px; text-align:center;
+  }
+  .side-link span{ display:block; font-size:.63rem; font-weight:700; max-width:66px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .side-link svg{ width:22px; height:22px; }
+  .side-link-active{ background:linear-gradient(160deg,#f8e3ec,#fbeddc); color:var(--berry); box-shadow:0 0 0 1px rgba(168,64,109,.12) inset; }
+  .side-logout{ flex:0 0 auto; min-width:64px; flex-direction:column; gap:.22rem; margin-top:0; padding:.5rem .3rem; border-radius:14px; }
+  .side-logout span{ display:block; font-size:.63rem; font-weight:700; }
+  .side-logout svg{ width:22px; height:22px; }
   .brand-photo{ width:36px; height:36px; }
   .avatar{ width:38px; height:38px; font-size:1rem; }
-  .main{ padding:1.1rem; }
+  .main{ padding:1.1rem; padding-bottom:6.5rem; }
   .two-col{ grid-template-columns:1fr; }
   .form-grid{ grid-template-columns:1fr; }
   .stat-grid{ grid-template-columns:repeat(2,1fr); }
@@ -542,7 +563,7 @@ function Shell({ title, personName, roleLabel, nav, active, onNav, onLogout, pri
         <aside className="sidebar">
           {primaryAction && (
             <button className="side-primary" type="button" onClick={primaryAction.onClick}>
-              <Plus size={15} /> {primaryAction.label}
+              <Plus size={15} /> <span>{primaryAction.label}</span>
             </button>
           )}
           <nav className="side-nav">
