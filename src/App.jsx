@@ -10,6 +10,7 @@ const OPEN_START_MIN = 10 * 60;
 const OPEN_END_MIN = 19 * 60;
 const SLOT_STEP_MIN = 30;
 const WEEKDAYS = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
+const WEEKDAYS_FULL = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
 const MONTHS = [
   "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
   "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
@@ -779,17 +780,25 @@ function BookingWizard({ data, persist, clientId, onBooked, promo, onClearPromo 
   const [done, setDone] = useState(false);
   const [appliedPromoId, setAppliedPromoId] = useState(null);
 
+  const promoServiceIdList = promo ? promoServiceIds(promo) : [];
+
   useEffect(() => {
-    if (promo?.serviceId && promo.id !== appliedPromoId) {
-      setServiceId(promo.serviceId);
+    if (promo && promo.id !== appliedPromoId) {
+      const ids = promoServiceIds(promo);
       setEmployeeId(""); setDate(null); setSlot(null); setDone(false);
-      setStep(2);
+      if (ids.length === 1) {
+        setServiceId(ids[0]);
+        setStep(2);
+      } else {
+        setServiceId(null);
+        setStep(1);
+      }
       setAppliedPromoId(promo.id);
     }
   }, [promo, appliedPromoId]);
 
   const service = data.services.find((s) => s.id === serviceId);
-  const promoApplies = !!(promo && promo.serviceId === serviceId);
+  const promoApplies = !!(promo && promoServiceIdList.includes(serviceId));
   const effectivePrice = promoApplies && promo.price != null ? promo.price : service?.price;
   const eligibleEmployees = data.employees.filter((e) => e.active && e.serviceIds.includes(serviceId));
 
@@ -865,8 +874,14 @@ function BookingWizard({ data, persist, clientId, onBooked, promo, onClearPromo 
 
       {step === 1 && (
         <div className="grid-cards">
+          {promo && promoServiceIdList.length > 1 && (
+            <div className="promo-banner">
+              <span>Elige uno de los servicios en promoción <strong>{promo.title}</strong>{promo.price != null && <> · precio especial {money(promo.price)}</>}</span>
+              <button className="btn-ghost" onClick={clearPromo}>Ver todos los servicios</button>
+            </div>
+          )}
           {CATEGORIES.map((cat) => {
-            const items = data.services.filter((s) => s.category === cat);
+            const items = data.services.filter((s) => s.category === cat && (!promo || promoServiceIdList.length === 0 || promoServiceIdList.includes(s.id)));
             if (items.length === 0) return null;
             return (
               <div key={cat}>
@@ -1013,7 +1028,7 @@ function ClientPromotions({ promotions, onUsePromo }) {
               {p.price != null && <div className="appt-meta">Valor: {money(p.price)}</div>}
               <div className="appt-meta">{promoValidityLabel(p)}</div>
             </div>
-            {p.serviceId && (
+            {promoServiceIds(p).length > 0 && (
               <div className="promo-actions">
                 <button className="btn-primary" onClick={() => onUsePromo(p)}>Pedir con esta promoción</button>
               </div>
@@ -1575,10 +1590,23 @@ function isPromoValidToday(promo) {
   const today = todayISO();
   if (promo.validFrom && today < promo.validFrom) return false;
   if (promo.validTo && today > promo.validTo) return false;
+  if (promo.weekday !== null && promo.weekday !== undefined && promo.weekday !== "") {
+    if (fromISO(today).getDay() !== Number(promo.weekday)) return false;
+  }
   return true;
 }
 
 function promoValidityLabel(promo) {
+  const hasWeekday = promo.weekday !== null && promo.weekday !== undefined && promo.weekday !== "";
+  const weekdayName = hasWeekday ? WEEKDAYS_FULL[Number(promo.weekday)] : null;
+
+  if (hasWeekday && promo.validFrom && promo.validTo) {
+    return `Todos los ${weekdayName.toLowerCase()}s, del ${promo.validFrom} al ${promo.validTo}`;
+  }
+  if (hasWeekday && promo.validFrom) return `Todos los ${weekdayName.toLowerCase()}s desde el ${promo.validFrom}`;
+  if (hasWeekday && promo.validTo) return `Todos los ${weekdayName.toLowerCase()}s hasta el ${promo.validTo}`;
+  if (hasWeekday) return `Todos los ${weekdayName.toLowerCase()}s`;
+
   if (promo.validFrom && promo.validTo) {
     if (promo.validFrom === promo.validTo) return `Válida el ${promo.validFrom}`;
     return `Válida del ${promo.validFrom} al ${promo.validTo}`;
@@ -1588,17 +1616,27 @@ function promoValidityLabel(promo) {
   return "Válida cualquier día";
 }
 
+function promoServiceIds(promo) {
+  if (Array.isArray(promo.serviceIds) && promo.serviceIds.length > 0) return promo.serviceIds;
+  return promo.serviceId ? [promo.serviceId] : [];
+}
+
 function PromotionsManager({ data, persist }) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [serviceId, setServiceId] = useState("");
+  const [serviceIds, setServiceIds] = useState([]);
   const [price, setPrice] = useState("");
+  const [weekday, setWeekday] = useState("");
   const [validFrom, setValidFrom] = useState("");
   const [validTo, setValidTo] = useState("");
   const [imageData, setImageData] = useState("");
   const [uploading, setUploading] = useState(false);
   const [fieldErrors, setFieldErrors] = useState({});
   const fileInputRef = useRef(null);
+
+  function toggleService(sid) {
+    setServiceIds((prev) => (prev.includes(sid) ? prev.filter((x) => x !== sid) : [...prev, sid]));
+  }
 
   async function handleFile(e) {
     const file = e.target.files?.[0];
@@ -1626,8 +1664,9 @@ function PromotionsManager({ data, persist }) {
       id: uid(),
       title: title.trim(),
       description: description.trim(),
-      serviceId: serviceId || null,
+      serviceIds: serviceIds,
       price: price === "" ? null : Number(price),
+      weekday: weekday === "" ? null : Number(weekday),
       validFrom: validFrom || null,
       validTo: validTo || null,
       image: imageData,
@@ -1639,7 +1678,7 @@ function PromotionsManager({ data, persist }) {
       window.alert("No se pudo publicar la promoción: hubo un problema de conexión con el servidor. Intenta de nuevo.");
       return;
     }
-    setTitle(""); setDescription(""); setServiceId(""); setPrice(""); setValidFrom(""); setValidTo(""); setImageData(""); setFieldErrors({});
+    setTitle(""); setDescription(""); setServiceIds([]); setPrice(""); setWeekday(""); setValidFrom(""); setValidTo(""); setImageData(""); setFieldErrors({});
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
@@ -1653,7 +1692,9 @@ function PromotionsManager({ data, persist }) {
     await persist({ ...data, promotions: (data.promotions || []).filter((p) => p.id !== id) });
   }
 
-  function serviceName(sid) { return data.services.find((s) => s.id === sid)?.name || null; }
+  function serviceNames(sids) {
+    return (sids || []).map((sid) => data.services.find((s) => s.id === sid)?.name).filter(Boolean).join(", ");
+  }
 
   return (
     <div className="panel">
@@ -1676,11 +1717,19 @@ function PromotionsManager({ data, persist }) {
           onChange={(e) => setDescription(e.target.value)}
         />
         <div>
-          <p className="field-label">Servicio de la promoción (opcional, para que la clienta pueda pedir la cita directo)</p>
-          <select className="input" value={serviceId} onChange={(e) => setServiceId(e.target.value)}>
-            <option value="">Sin servicio asociado</option>
-            {data.services.map((s) => <option key={s.id} value={s.id}>{s.name} · {money(s.price)}</option>)}
-          </select>
+          <p className="field-label">Servicios en promoción (opcional, puedes elegir uno o varios para que la clienta pueda pedir la cita directo)</p>
+          <div className="chip-row">
+            {data.services.map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                className={`chip ${serviceIds.includes(s.id) ? "chip-active" : ""}`}
+                onClick={() => toggleService(s.id)}
+              >
+                {s.name} · {money(s.price)}
+              </button>
+            ))}
+          </div>
         </div>
         <div>
           <p className="field-label">Valor de la promoción</p>
@@ -1694,7 +1743,16 @@ function PromotionsManager({ data, persist }) {
           {fieldErrors.price && <p className="field-error-text">{fieldErrors.price}</p>}
         </div>
         <div>
-          <p className="field-label">Vigencia de la promoción (déjalo vacío para que aplique cualquier día)</p>
+          <p className="field-label">Repetir cada (opcional): elige un día de la semana para que la promoción se repita ese día dentro del rango de fechas, por ejemplo todos los jueves</p>
+          <select className="input" value={weekday} onChange={(e) => setWeekday(e.target.value)}>
+            <option value="">No repetir · aplica todos los días del rango</option>
+            {WEEKDAYS_FULL.map((w, i) => <option key={w} value={i}>Todos los {w.toLowerCase()}s</option>)}
+          </select>
+        </div>
+        <div>
+          <p className="field-label">
+            {weekday === "" ? "Vigencia de la promoción (déjalo vacío para que aplique cualquier día)" : `Rango de fechas: desde el primer ${WEEKDAYS_FULL[Number(weekday)]?.toLowerCase()} hasta el último ${WEEKDAYS_FULL[Number(weekday)]?.toLowerCase()} que quieras incluir`}
+          </p>
           <div className="form-grid">
             <input className="input" type="date" value={validFrom} onChange={(e) => setValidFrom(e.target.value)} />
             <div>
@@ -1732,7 +1790,7 @@ function PromotionsManager({ data, persist }) {
             <div className="promo-body">
               <div className="promo-title">{p.title}{!p.active && <span className="tag tag-inactiva">oculta</span>}</div>
               {p.description && <div className="promo-desc">{p.description}</div>}
-              {serviceName(p.serviceId) && <div className="appt-meta">Servicio: {serviceName(p.serviceId)}</div>}
+              {serviceNames(promoServiceIds(p)) && <div className="appt-meta">Servicios: {serviceNames(promoServiceIds(p))}</div>}
               {p.price != null && <div className="appt-meta">Valor: {money(p.price)}</div>}
               <div className="appt-meta">{promoValidityLabel(p)}</div>
             </div>
