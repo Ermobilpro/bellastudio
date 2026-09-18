@@ -2,7 +2,6 @@
   "name": "BellaStudio",
   "short_name": "BellaStudio",
   "description": "Reservas de citas para BellaStudio",
-  "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "background_color": "#fffafb",
