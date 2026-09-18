@@ -401,6 +401,8 @@ html, body, #root{ height:100%; margin:0; padding:0; }
 .promo-desc{ font-size:.82rem; color:var(--muted); margin-top:.25rem; white-space:pre-wrap; }
 .promo-actions{ display:flex; gap:.5rem; padding:0 .95rem .9rem; flex-wrap:wrap; }
 .promo-strip{ margin-bottom:1.4rem; }
+.promo-banner{ display:flex; align-items:center; justify-content:space-between; gap:.75rem; flex-wrap:wrap;
+  background:var(--lilac-bg); color:var(--lilac); border-radius:13px; padding:.7rem 1rem; margin-bottom:1.1rem; font-size:.88rem; font-weight:700; }
 .file-input-wrap{ display:flex; flex-direction:column; gap:.35rem; }
 .promo-upload-preview{ width:100%; max-width:280px; border-radius:12px; margin-top:.5rem; display:block; }
 
@@ -766,7 +768,7 @@ function AuthScreen({ data, businessName, onClientAuth, onTeamAuth, onLeaveCompa
 
 /* ---------------------------------- Vista clienta: reservar ---------------------------------- */
 
-function BookingWizard({ data, persist, clientId, onBooked }) {
+function BookingWizard({ data, persist, clientId, onBooked, promo, onClearPromo }) {
   const [step, setStep] = useState(1);
   const [serviceId, setServiceId] = useState(null);
   const [employeeId, setEmployeeId] = useState("");
@@ -775,8 +777,20 @@ function BookingWizard({ data, persist, clientId, onBooked }) {
   const [calMonth, setCalMonth] = useState(new Date().getMonth());
   const [slot, setSlot] = useState(null);
   const [done, setDone] = useState(false);
+  const [appliedPromoId, setAppliedPromoId] = useState(null);
+
+  useEffect(() => {
+    if (promo?.serviceId && promo.id !== appliedPromoId) {
+      setServiceId(promo.serviceId);
+      setEmployeeId(""); setDate(null); setSlot(null); setDone(false);
+      setStep(2);
+      setAppliedPromoId(promo.id);
+    }
+  }, [promo, appliedPromoId]);
 
   const service = data.services.find((s) => s.id === serviceId);
+  const promoApplies = !!(promo && promo.serviceId === serviceId);
+  const effectivePrice = promoApplies && promo.price != null ? promo.price : service?.price;
   const eligibleEmployees = data.employees.filter((e) => e.active && e.serviceIds.includes(serviceId));
 
   function candidatesFor(empId) {
@@ -803,11 +817,17 @@ function BookingWizard({ data, persist, clientId, onBooked }) {
     return out;
   }
 
+  function clearPromo() {
+    setAppliedPromoId(null);
+    onClearPromo?.();
+  }
+
   async function confirmBooking() {
     const appt = {
       id: uid(), clientId, employeeId: slot.employeeId, serviceId,
-      serviceName: service.name, price: service.price, duration: service.duration,
+      serviceName: service.name, price: effectivePrice, duration: service.duration,
       date, time: slot.time, status: "confirmada", createdAt: Date.now(),
+      promoId: promoApplies ? promo.id : null, promoTitle: promoApplies ? promo.title : null,
     };
     await persist({ ...data, appointments: [...data.appointments, appt] });
     setDone(true);
@@ -815,6 +835,7 @@ function BookingWizard({ data, persist, clientId, onBooked }) {
 
   function restart() {
     setStep(1); setServiceId(null); setEmployeeId(""); setDate(null); setSlot(null); setDone(false);
+    clearPromo();
   }
 
   if (done) {
@@ -830,6 +851,12 @@ function BookingWizard({ data, persist, clientId, onBooked }) {
 
   return (
     <div className="panel">
+      {promoApplies && (
+        <div className="promo-banner">
+          <span>Reservando con la promoción <strong>{promo.title}</strong>{promo.price != null && <> · precio especial {money(promo.price)}</>}</span>
+          <button className="btn-ghost" onClick={() => { setServiceId(null); setStep(1); clearPromo(); }}>Quitar promoción</button>
+        </div>
+      )}
       <ol className="steps">
         {["Servicio", "Profesional", "Fecha", "Hora"].map((s, i) => (
           <li key={s} className={`step ${step === i + 1 ? "step-active" : ""} ${step > i + 1 ? "step-done" : ""}`}>{s}</li>
@@ -861,7 +888,7 @@ function BookingWizard({ data, persist, clientId, onBooked }) {
       {step === 2 && (
         <div>
           <button className="back-link" onClick={() => setStep(1)}>&larr; Cambiar servicio</button>
-          <p className="field-hint">Servicio: <strong>{service?.name}</strong></p>
+          <p className="field-hint">Servicio: <strong>{service?.name}</strong>{promoApplies && promo.price != null && <> · {money(promo.price)} (promoción)</>}</p>
           <div className="option-list">
             <button className={`option-row ${employeeId === "" ? "option-row-active" : ""}`} onClick={() => { setEmployeeId(""); setStep(3); }}>
               Cualquiera disponible
@@ -907,7 +934,7 @@ function BookingWizard({ data, persist, clientId, onBooked }) {
           <p><strong>{service?.name}</strong></p>
           <p>{date} a las {slot.time}</p>
           <p>Con {slot.employeeName}</p>
-          <p>{money(service?.price)}</p>
+          <p>{money(effectivePrice)}{promoApplies && <span className="tag tag-admin" style={{ marginLeft: ".4rem" }}>promoción</span>}</p>
           <div className="row-gap">
             <button className="btn-ghost" onClick={() => setSlot(null)}>Elegir otra hora</button>
             <button className="btn-primary" onClick={confirmBooking}>Confirmar reserva</button>
@@ -970,8 +997,8 @@ function MyAppointments({ data, persist, clientId }) {
   );
 }
 
-function ClientPromotions({ promotions }) {
-  const active = (promotions || []).filter((p) => p.active);
+function ClientPromotions({ promotions, onUsePromo }) {
+  const active = (promotions || []).filter(isPromoValidToday);
   if (active.length === 0) return null;
   return (
     <div className="promo-strip">
@@ -983,7 +1010,14 @@ function ClientPromotions({ promotions }) {
             <div className="promo-body">
               <div className="promo-title">{p.title}</div>
               {p.description && <div className="promo-desc">{p.description}</div>}
+              {p.price != null && <div className="appt-meta">Valor: {money(p.price)}</div>}
+              <div className="appt-meta">{promoValidityLabel(p)}</div>
             </div>
+            {p.serviceId && (
+              <div className="promo-actions">
+                <button className="btn-primary" onClick={() => onUsePromo(p)}>Pedir con esta promoción</button>
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -993,6 +1027,7 @@ function ClientPromotions({ promotions }) {
 
 function ClientApp({ data, persist, session, onLogout }) {
   const [tab, setTab] = useState("reservar");
+  const [activePromo, setActivePromo] = useState(null);
   const client = data.clients.find((c) => c.id === session.id);
   return (
     <Shell
@@ -1004,10 +1039,22 @@ function ClientApp({ data, persist, session, onLogout }) {
         { key: "mis-citas", label: "Mis citas", icon: Clock },
       ]}
       active={tab} onNav={setTab} onLogout={onLogout}
-      primaryAction={{ label: "Nueva cita", onClick: () => setTab("reservar") }}
+      primaryAction={{ label: "Nueva cita", onClick: () => { setActivePromo(null); setTab("reservar"); } }}
     >
-      {tab === "reservar" && <ClientPromotions promotions={data.promotions} />}
-      {tab === "reservar" && <BookingWizard data={data} persist={persist} clientId={client.id} onBooked={() => setTab("mis-citas")} />}
+      {tab === "reservar" && (
+        <ClientPromotions
+          promotions={data.promotions}
+          onUsePromo={(p) => setActivePromo(p)}
+        />
+      )}
+      {tab === "reservar" && (
+        <BookingWizard
+          data={data} persist={persist} clientId={client.id}
+          promo={activePromo}
+          onClearPromo={() => setActivePromo(null)}
+          onBooked={() => { setActivePromo(null); setTab("mis-citas"); }}
+        />
+      )}
       {tab === "mis-citas" && <MyAppointments data={data} persist={persist} clientId={client.id} />}
     </Shell>
   );
@@ -1523,9 +1570,31 @@ function ServicesManager({ data, persist }) {
   );
 }
 
+function isPromoValidToday(promo) {
+  if (!promo.active) return false;
+  const today = todayISO();
+  if (promo.validFrom && today < promo.validFrom) return false;
+  if (promo.validTo && today > promo.validTo) return false;
+  return true;
+}
+
+function promoValidityLabel(promo) {
+  if (promo.validFrom && promo.validTo) {
+    if (promo.validFrom === promo.validTo) return `Válida el ${promo.validFrom}`;
+    return `Válida del ${promo.validFrom} al ${promo.validTo}`;
+  }
+  if (promo.validFrom) return `Válida desde el ${promo.validFrom}`;
+  if (promo.validTo) return `Válida hasta el ${promo.validTo}`;
+  return "Válida cualquier día";
+}
+
 function PromotionsManager({ data, persist }) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const [serviceId, setServiceId] = useState("");
+  const [price, setPrice] = useState("");
+  const [validFrom, setValidFrom] = useState("");
+  const [validTo, setValidTo] = useState("");
   const [imageData, setImageData] = useState("");
   const [uploading, setUploading] = useState(false);
   const [fieldErrors, setFieldErrors] = useState({});
@@ -1549,18 +1618,28 @@ function PromotionsManager({ data, persist }) {
     const errs = {};
     if (!title.trim()) errs.title = "Escribe un título para la promoción.";
     if (!imageData) errs.image = "Sube una imagen desde tu celular o computador.";
+    if (price !== "" && (isNaN(Number(price)) || Number(price) < 0)) errs.price = "El valor debe ser un número igual o mayor a 0.";
+    if (validFrom && validTo && validTo < validFrom) errs.validTo = "La fecha final no puede ser antes de la inicial.";
     setFieldErrors(errs);
     if (Object.keys(errs).length > 0) return;
     const promo = {
       id: uid(),
       title: title.trim(),
       description: description.trim(),
+      serviceId: serviceId || null,
+      price: price === "" ? null : Number(price),
+      validFrom: validFrom || null,
+      validTo: validTo || null,
       image: imageData,
       active: true,
       createdAt: todayISO(),
     };
-    await persist({ ...data, promotions: [promo, ...(data.promotions || [])] });
-    setTitle(""); setDescription(""); setImageData(""); setFieldErrors({});
+    const ok = await persist({ ...data, promotions: [promo, ...(data.promotions || [])] });
+    if (ok === false) {
+      window.alert("No se pudo publicar la promoción: hubo un problema de conexión con el servidor. Intenta de nuevo.");
+      return;
+    }
+    setTitle(""); setDescription(""); setServiceId(""); setPrice(""); setValidFrom(""); setValidTo(""); setImageData(""); setFieldErrors({});
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
@@ -1574,10 +1653,12 @@ function PromotionsManager({ data, persist }) {
     await persist({ ...data, promotions: (data.promotions || []).filter((p) => p.id !== id) });
   }
 
+  function serviceName(sid) { return data.services.find((s) => s.id === sid)?.name || null; }
+
   return (
     <div className="panel">
       <h3 className="section-title">Nueva promoción</h3>
-      <p className="field-hint">Solo la administradora puede crear promociones. Se pueden subir desde el celular o el computador, y únicamente las clientas las verán.</p>
+      <p className="field-hint">Solo la administradora puede crear promociones. Se pueden subir desde el celular o el computador. Las clientas las verán en su pantalla principal y podrán pedir la cita directamente desde ahí, con el valor y en cualquier día disponible (o solo dentro del rango de fechas que definas).</p>
       <div className="form-grid-1">
         <div>
           <input
@@ -1594,6 +1675,39 @@ function PromotionsManager({ data, persist }) {
           value={description}
           onChange={(e) => setDescription(e.target.value)}
         />
+        <div>
+          <p className="field-label">Servicio de la promoción (opcional, para que la clienta pueda pedir la cita directo)</p>
+          <select className="input" value={serviceId} onChange={(e) => setServiceId(e.target.value)}>
+            <option value="">Sin servicio asociado</option>
+            {data.services.map((s) => <option key={s.id} value={s.id}>{s.name} · {money(s.price)}</option>)}
+          </select>
+        </div>
+        <div>
+          <p className="field-label">Valor de la promoción</p>
+          <input
+            className={`input ${fieldErrors.price ? "input-error" : ""}`}
+            type="number"
+            placeholder="Precio especial de la promoción"
+            value={price}
+            onChange={(e) => setPrice(e.target.value)}
+          />
+          {fieldErrors.price && <p className="field-error-text">{fieldErrors.price}</p>}
+        </div>
+        <div>
+          <p className="field-label">Vigencia de la promoción (déjalo vacío para que aplique cualquier día)</p>
+          <div className="form-grid">
+            <input className="input" type="date" value={validFrom} onChange={(e) => setValidFrom(e.target.value)} />
+            <div>
+              <input
+                className={`input ${fieldErrors.validTo ? "input-error" : ""}`}
+                type="date"
+                value={validTo}
+                onChange={(e) => setValidTo(e.target.value)}
+              />
+              {fieldErrors.validTo && <p className="field-error-text">{fieldErrors.validTo}</p>}
+            </div>
+          </div>
+        </div>
         <div className="file-input-wrap">
           <input
             ref={fileInputRef}
@@ -1618,6 +1732,9 @@ function PromotionsManager({ data, persist }) {
             <div className="promo-body">
               <div className="promo-title">{p.title}{!p.active && <span className="tag tag-inactiva">oculta</span>}</div>
               {p.description && <div className="promo-desc">{p.description}</div>}
+              {serviceName(p.serviceId) && <div className="appt-meta">Servicio: {serviceName(p.serviceId)}</div>}
+              {p.price != null && <div className="appt-meta">Valor: {money(p.price)}</div>}
+              <div className="appt-meta">{promoValidityLabel(p)}</div>
             </div>
             <div className="promo-actions">
               <button className="btn-ghost" onClick={() => toggleActive(p.id)}>{p.active ? "Ocultar" : "Mostrar"}</button>
