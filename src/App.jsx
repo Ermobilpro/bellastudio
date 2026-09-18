@@ -6,9 +6,19 @@ import {
 
 const LOGO_SRC = "/logo.png";
 const CATEGORIES = ["Uñas", "Keratina", "Otro"];
-const OPEN_START_MIN = 10 * 60;
+const OPEN_START_MIN = 7 * 60;
 const OPEN_END_MIN = 19 * 60;
 const SLOT_STEP_MIN = 30;
+// Franjas "especiales": fuera del horario habitual (9am-6pm), así que una cita
+// que caiga aquí no se confirma sola — queda pendiente de que la administradora
+// la acepte o la rechace.
+const EXTENDED_RANGES = [
+  [7 * 60, 9 * 60],
+  [18 * 60, 19 * 60],
+];
+function isExtendedSlot(startMin) {
+  return EXTENDED_RANGES.some(([s, e]) => startMin >= s && startMin < e);
+}
 const WEEKDAYS = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
 const WEEKDAYS_FULL = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
 const MONTHS = [
@@ -434,6 +444,8 @@ html, body, #root{ height:100%; margin:0; padding:0; }
 .appt-right{ display:flex; align-items:center; gap:.5rem; }
 .tag{ font-size:.72rem; font-weight:800; padding:.22rem .6rem; border-radius:999px; }
 .tag-confirmada{ background:#f7e4ed; color:var(--berry); }
+.tag-pendiente{ background:var(--gold-bg); color:var(--gold-ink); }
+.tag-rechazada{ background:var(--danger-bg); color:var(--danger); }
 .tag-completada{ background:var(--gold-bg); color:var(--gold-ink); }
 .tag-cancelada{ background:var(--danger-bg); color:var(--danger); }
 .tag-admin{ background:var(--lilac-bg); color:var(--lilac); margin-left:.4rem; }
@@ -928,7 +940,7 @@ function BookingWizard({ data, persist, clientId, onBooked, promo, onClearPromo 
   function isFree(empId, dateISO, startMin, duration) {
     const end = startMin + duration;
     return !data.appointments.some((a) => {
-      if (a.employeeId !== empId || a.date !== dateISO || a.status === "cancelada") return false;
+      if (a.employeeId !== empId || a.date !== dateISO || (a.status === "cancelada" || a.status === "rechazada")) return false;
       const aStart = timeToMin(a.time);
       const aEnd = aStart + a.duration;
       return startMin < aEnd && end > aStart;
@@ -937,8 +949,10 @@ function BookingWizard({ data, persist, clientId, onBooked, promo, onClearPromo 
 
   function availableSlotsFor(dateISO) {
     if (!service) return [];
+    const extendedOn = data.extendedHoursEnabled !== false;
     const out = [];
     for (let m = OPEN_START_MIN; m + service.duration <= OPEN_END_MIN; m += SLOT_STEP_MIN) {
+      if (isExtendedSlot(m) && !extendedOn) continue;
       const cands = candidatesFor(employeeId).filter((e) => employeeWorksOn(e, dateISO) && isFree(e.id, dateISO, m, service.duration));
       if (cands.length > 0) out.push({ time: minToTime(m), employeeId: cands[0].id, employeeName: cands[0].name });
     }
@@ -951,10 +965,11 @@ function BookingWizard({ data, persist, clientId, onBooked, promo, onClearPromo 
   }
 
   async function confirmBooking() {
+    const pending = isExtendedSlot(timeToMin(slot.time));
     const appt = {
       id: uid(), clientId, employeeId: slot.employeeId, serviceId,
       serviceName: service.name, price: effectivePrice, duration: service.duration,
-      date, time: slot.time, status: "confirmada", createdAt: Date.now(),
+      date, time: slot.time, status: pending ? "pendiente" : "confirmada", createdAt: Date.now(),
       promoId: promoApplies ? promo.id : null, promoTitle: promoApplies ? promo.title : null,
     };
     const ok = await persist({ ...data, appointments: [...data.appointments, appt] });
@@ -971,11 +986,16 @@ function BookingWizard({ data, persist, clientId, onBooked, promo, onClearPromo 
   }
 
   if (done) {
+    const wasPending = isExtendedSlot(timeToMin(slot.time));
     return (
       <div className="panel empty-state">
         <div className="arch-icon"><Check size={22} /></div>
-        <h3>Cita confirmada</h3>
-        <p>Tu cita de {service?.name} quedó agendada para el {date} a las {slot?.time}. La puedes ver o cancelar desde "Mis citas".</p>
+        <h3>{wasPending ? "Solicitud enviada" : "Cita confirmada"}</h3>
+        <p>
+          {wasPending
+            ? `Tu cita de ${service?.name} para el ${date} a las ${slot?.time} es en horario especial, así que queda pendiente de aprobación. Te avisaremos cuando la administradora la confirme — la puedes ver desde "Mis citas".`
+            : `Tu cita de ${service?.name} quedó agendada para el ${date} a las ${slot?.time}. La puedes ver o cancelar desde "Mis citas".`}
+        </p>
         <button className="btn-primary" onClick={() => { restart(); onBooked(); }}>Ver mis citas</button>
       </div>
     );
@@ -1071,10 +1091,15 @@ function BookingWizard({ data, persist, clientId, onBooked, promo, onClearPromo 
           <p className="field-hint">{date} · {service?.name}</p>
           <div className="slot-grid">
             {availableSlotsFor(date).map((s) => (
-              <button key={s.time} className="slot-btn" onClick={() => setSlot(s)}>{s.time}</button>
+              <button key={s.time} className="slot-btn" onClick={() => setSlot(s)}>
+                {s.time}{isExtendedSlot(timeToMin(s.time)) ? " *" : ""}
+              </button>
             ))}
             {availableSlotsFor(date).length === 0 && <p className="muted">No hay horarios disponibles ese día. Prueba otra fecha.</p>}
           </div>
+          {availableSlotsFor(date).some((s) => isExtendedSlot(timeToMin(s.time))) && (
+            <p className="field-hint" style={{ marginTop: ".7rem" }}>* Horario especial (antes de 9am o después de 6pm): la cita queda pendiente de aprobación en vez de confirmarse al instante.</p>
+          )}
         </div>
       )}
 
@@ -1085,6 +1110,9 @@ function BookingWizard({ data, persist, clientId, onBooked, promo, onClearPromo 
           <p>{date} a las {slot.time}</p>
           <p>Con {slot.employeeName}</p>
           <p>{money(effectivePrice)}{promoApplies && <span className="tag tag-admin" style={{ marginLeft: ".4rem" }}>promoción</span>}</p>
+          {isExtendedSlot(timeToMin(slot.time)) && (
+            <p className="muted">Este horario es especial, así que quedará pendiente de aprobación en vez de confirmarse de inmediato.</p>
+          )}
           <div className="row-gap">
             <button className="btn-ghost" onClick={() => setSlot(null)}>Elegir otra hora</button>
             <button className="btn-primary" onClick={confirmBooking}>Confirmar reserva</button>
@@ -1100,8 +1128,8 @@ function MyAppointments({ data, persist, clientId }) {
     .filter((a) => a.clientId === clientId)
     .sort((a, b) => (a.date + a.time < b.date + b.time ? -1 : 1));
   const now = todayISO();
-  const upcoming = mine.filter((a) => a.date >= now && a.status !== "cancelada");
-  const past = mine.filter((a) => a.date < now || a.status === "cancelada");
+  const upcoming = mine.filter((a) => a.date >= now && a.status !== "cancelada" && a.status !== "rechazada");
+  const past = mine.filter((a) => a.date < now || a.status === "cancelada" || a.status === "rechazada");
 
   const [reagendarId, setReagendarId] = useState(null);
   const [calYear, setCalYear] = useState(new Date().getFullYear());
@@ -1119,7 +1147,7 @@ function MyAppointments({ data, persist, clientId }) {
   }
 
   async function cancel(a) {
-    if (hoursUntil(a) < cancelMinHours) {
+    if (a.status !== "pendiente" && hoursUntil(a) < cancelMinHours) {
       window.alert(
         `Esta cita es en menos de ${cancelMinHours} horas, así que ya no se puede cancelar desde aquí.` +
         (contactPhone ? ` Escríbenos directamente al ${contactPhone} si de verdad no puedes venir.` : " Contacta directamente al salón si de verdad no puedes venir.")
@@ -1135,7 +1163,7 @@ function MyAppointments({ data, persist, clientId }) {
     const end = startMin + duration;
     return !data.appointments.some((x) => {
       if (x.id === excludeId) return false;
-      if (x.employeeId !== empId || x.date !== dateISO || x.status === "cancelada") return false;
+      if (x.employeeId !== empId || x.date !== dateISO || (x.status === "cancelada" || x.status === "rechazada")) return false;
       const xStart = timeToMin(x.time);
       const xEnd = xStart + x.duration;
       return startMin < xEnd && end > xStart;
@@ -1199,9 +1227,12 @@ function MyAppointments({ data, persist, clientId }) {
               <div>
                 <div className="appt-service">{a.serviceName}</div>
                 <div className="appt-meta">{a.date} · {a.time} · con {employeeName(a.employeeId)}</div>
+                {a.status === "pendiente" && (
+                  <div className="appt-meta">Horario especial: queda pendiente de aprobación de la administradora.</div>
+                )}
               </div>
               <div className="appt-right">
-                <span className="tag tag-confirmada">{a.status}</span>
+                <span className={`tag tag-${a.status}`}>{a.status}</span>
                 <button className="btn-ghost" onClick={() => (reagendarId === a.id ? setReagendarId(null) : startReagendar(a))}>
                   {reagendarId === a.id ? "Cerrar" : "Reagendar"}
                 </button>
@@ -1242,6 +1273,9 @@ function MyAppointments({ data, persist, clientId }) {
                   <div>
                     <div className="appt-service">{a.serviceName}</div>
                     <div className="appt-meta">{a.date} · {a.time} · con {employeeName(a.employeeId)}</div>
+                    {a.status === "rechazada" && (
+                      <div className="appt-meta">La administradora no pudo confirmar este horario especial. Agenda otra cita cuando quieras.</div>
+                    )}
                   </div>
                   <div className="appt-right">
                     <span className={`tag tag-${a.status}`}>{a.status}</span>
@@ -1392,7 +1426,7 @@ function AgendaView({ data, persist, employeeId, onlyMine, isAdmin }) {
     const end = startMin + duration;
     return !data.appointments.some((x) => {
       if (x.id === excludeApptId) return false;
-      if (x.employeeId !== empId || x.date !== dateISO || x.status === "cancelada") return false;
+      if (x.employeeId !== empId || x.date !== dateISO || (x.status === "cancelada" || x.status === "rechazada")) return false;
       const xStart = timeToMin(x.time);
       const xEnd = xStart + x.duration;
       return startMin < xEnd && end > xStart;
@@ -1485,10 +1519,34 @@ function AgendaView({ data, persist, employeeId, onlyMine, isAdmin }) {
     await persist({ ...data, appointments, devoluciones });
   }
 
+  async function resolverCitaPendiente(id, aceptar) {
+    await persist({ ...data, appointments: data.appointments.map((a) => (a.id === id ? { ...a, status: aceptar ? "confirmada" : "rechazada" } : a)) });
+  }
+
   const pendientesDevolucion = isAdmin ? (data.devoluciones || []).filter((d) => d.estado === "pendiente") : [];
+  const pendientesCitas = isAdmin ? data.appointments.filter((a) => a.status === "pendiente") : [];
 
   return (
     <>
+      {pendientesCitas.length > 0 && (
+        <div className="panel" style={{ marginBottom: "1.5rem" }}>
+          <h3 className="section-title">Solicitudes de horario especial pendientes</h3>
+          <div className="appt-list">
+            {pendientesCitas.map((a) => (
+              <div key={a.id} className="appt-row">
+                <div>
+                  <div className="appt-service">{serviceName(a.serviceId)}</div>
+                  <div className="appt-meta">{clientName(a.clientId)} · {a.date} · {a.time} · con {employeeName(a.employeeId)}</div>
+                </div>
+                <div className="appt-right">
+                  <button className="btn-primary" onClick={() => resolverCitaPendiente(a.id, true)}>Aceptar</button>
+                  <button className="btn-ghost-danger" onClick={() => resolverCitaPendiente(a.id, false)}>Rechazar</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       {pendientesDevolucion.length > 0 && (
         <div className="panel" style={{ marginBottom: "1.5rem" }}>
           <h3 className="section-title">Solicitudes de devolución pendientes</h3>
@@ -1836,6 +1894,10 @@ function ServicesManager({ data, persist }) {
     if (isNaN(n) || n < 0) return;
     await persist({ ...data, pointsPerThousand: n });
   }
+  const extendedOn = data.extendedHoursEnabled !== false;
+  async function toggleExtendedHours() {
+    await persist({ ...data, extendedHoursEnabled: !extendedOn });
+  }
 
   async function add() {
     const errs = validateServiceFields({ name, duration, price });
@@ -1882,6 +1944,16 @@ function ServicesManager({ data, persist }) {
         <div style={{ display: "flex", gap: ".6rem", alignItems: "center", flexWrap: "wrap" }}>
           <input className="input" type="number" min="0" style={{ maxWidth: 140 }} value={cancelHours} onChange={(e) => setCancelHours(e.target.value)} />
           <button className="btn-ghost" onClick={saveCancelHours}>Guardar</button>
+        </div>
+      </div>
+      <div className="panel" style={{ marginBottom: "1.5rem" }}>
+        <h3 className="section-title">Horario especial (7-9am y 6-7pm)</h3>
+        <p className="field-hint">
+          El negocio abre de 7am a 7pm. Entre 9am y 6pm las citas se confirman solas; fuera de esas horas (7-9am y 6-7pm),
+          cada solicitud te queda pendiente en "Todas las citas" para que la aceptes o la rechaces.
+        </p>
+        <div className="checkbox-row" style={{ marginBottom: 0 }}>
+          <label><input type="checkbox" checked={extendedOn} onChange={toggleExtendedHours} /> Ofrecer horario especial a las clientas</label>
         </div>
       </div>
       <div className="panel" style={{ marginBottom: "1.5rem" }}>
@@ -2986,7 +3058,7 @@ function NuevaCitaAdmin({ data, persist }) {
   function isFreeFor(empId, dateISO, startMin, duration) {
     const end = startMin + duration;
     return !data.appointments.some((x) => {
-      if (x.employeeId !== empId || x.date !== dateISO || x.status === "cancelada") return false;
+      if (x.employeeId !== empId || x.date !== dateISO || (x.status === "cancelada" || x.status === "rechazada")) return false;
       const xStart = timeToMin(x.time);
       const xEnd = xStart + x.duration;
       return startMin < xEnd && end > xStart;
