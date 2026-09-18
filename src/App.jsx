@@ -473,7 +473,7 @@ html, body, #root{ height:100%; margin:0; padding:0; }
 
 /* ---------------------------------- Calendario ---------------------------------- */
 
-function MonthCalendar({ year, month, selectedDate, onSelect, minDateISO, renderBadge, onMonthChange }) {
+function MonthCalendar({ year, month, selectedDate, onSelect, minDateISO, renderBadge, onMonthChange, isDateDisabled }) {
   const first = new Date(year, month, 1);
   const startWeekday = first.getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
@@ -502,7 +502,7 @@ function MonthCalendar({ year, month, selectedDate, onSelect, minDateISO, render
         {cells.map((d, i) => {
           if (d === null) return <div key={i} className="cal-cell cal-empty" />;
           const iso = `${year}-${pad2(month + 1)}-${pad2(d)}`;
-          const disabled = minDateISO ? iso < minDateISO : false;
+          const disabled = (minDateISO ? iso < minDateISO : false) || (isDateDisabled ? isDateDisabled(iso) : false);
           const isSelected = iso === selectedDate;
           const isToday = iso === todayISO();
           return (
@@ -740,7 +740,7 @@ function AuthScreen({ data, businessName, onClientAuth, onTeamAuth, onLeaveCompa
           <button className="choice-card" onClick={() => setMode("cliente")}>
             <User size={20} />
             <div>
-              <div className="choice-title">Soy clienta</div>
+              <div className="choice-title">Soy cliente o clienta</div>
               <div className="choice-sub">Reservar una cita o ver las mías</div>
             </div>
           </button>
@@ -798,7 +798,9 @@ function BookingWizard({ data, persist, clientId, onBooked, promo, onClearPromo 
   }, [promo, appliedPromoId]);
 
   const service = data.services.find((s) => s.id === serviceId);
-  const promoApplies = !!(promo && promoServiceIdList.includes(serviceId));
+  const promoServiceOk = !!(promo && promoServiceIdList.includes(serviceId));
+  const promoDateOk = !date || promoDateAllowed(promo, date);
+  const promoApplies = promoServiceOk && promoDateOk;
   const effectivePrice = promoApplies && promo.price != null ? promo.price : service?.price;
   const eligibleEmployees = data.employees.filter((e) => e.active && e.serviceIds.includes(serviceId));
 
@@ -921,9 +923,13 @@ function BookingWizard({ data, persist, clientId, onBooked, promo, onClearPromo 
       {step === 3 && (
         <div>
           <button className="back-link" onClick={() => setStep(2)}>&larr; Cambiar profesional</button>
+          {promoServiceOk && promo.weekday !== null && promo.weekday !== undefined && promo.weekday !== "" && (
+            <p className="field-hint">Esta promoción aplica solo los {WEEKDAYS_FULL[Number(promo.weekday)].toLowerCase()}s{promo.validFrom ? ` (del ${promo.validFrom}${promo.validTo ? ` al ${promo.validTo}` : ""})` : ""}. Elige uno de esos días para el precio especial.</p>
+          )}
           <MonthCalendar
             year={calYear} month={calMonth} selectedDate={date}
             minDateISO={todayISO()}
+            isDateDisabled={promoServiceOk ? (iso) => !promoDateAllowed(promo, iso) : undefined}
             onMonthChange={(y, m) => { setCalYear(y); setCalMonth(m); }}
             onSelect={(iso) => { setDate(iso); setSlot(null); setStep(4); }}
           />
@@ -1013,7 +1019,7 @@ function MyAppointments({ data, persist, clientId }) {
 }
 
 function ClientPromotions({ promotions, onUsePromo }) {
-  const active = (promotions || []).filter(isPromoValidToday);
+  const active = (promotions || []).filter(isPromoVisible);
   if (active.length === 0) return null;
   return (
     <div className="promo-strip">
@@ -1048,7 +1054,7 @@ function ClientApp({ data, persist, session, onLogout }) {
     <Shell
       title={data.businessName}
       personName={client?.name?.split(" ")[0] || ""}
-      roleLabel="Clienta"
+      roleLabel="Cliente/a"
       nav={[
         { key: "reservar", label: "Reservar cita", icon: Calendar },
         { key: "mis-citas", label: "Mis citas", icon: Clock },
@@ -1585,13 +1591,24 @@ function ServicesManager({ data, persist }) {
   );
 }
 
-function isPromoValidToday(promo) {
+function isPromoVisible(promo) {
+  // Controla si la promoción se muestra en la pantalla de la clienta: se anuncia
+  // todos los días dentro de su rango de vigencia, aunque solo se pueda agendar
+  // el día de la semana que repite (ej. "todos los lunes" se ve toda la semana).
   if (!promo.active) return false;
   const today = todayISO();
   if (promo.validFrom && today < promo.validFrom) return false;
   if (promo.validTo && today > promo.validTo) return false;
+  return true;
+}
+
+function promoDateAllowed(promo, dateISO) {
+  // Controla si una fecha puntual se puede agendar con el precio/condición de la promoción.
+  if (!promo || !dateISO) return true;
+  if (promo.validFrom && dateISO < promo.validFrom) return false;
+  if (promo.validTo && dateISO > promo.validTo) return false;
   if (promo.weekday !== null && promo.weekday !== undefined && promo.weekday !== "") {
-    if (fromISO(today).getDay() !== Number(promo.weekday)) return false;
+    if (fromISO(dateISO).getDay() !== Number(promo.weekday)) return false;
   }
   return true;
 }
