@@ -547,6 +547,128 @@ html, body, #root{ height:100%; margin:0; padding:0; }
   .appbar{ padding:0 1rem; height:64px; }
   .profile span{ display:none; }
 }
+
+/* ====== Rediseño visual premium ====== */
+.app-shell{
+  --ink:#241b22;
+  --muted:#786b75;
+  --paper:rgba(255,255,255,.92);
+  --soft:#f8f2f5;
+  --line:#eadfe5;
+  --berry:#a23c68;
+  --berry-dark:#7f2c51;
+  --rose:#e989a8;
+  --gold:#c79a4b;
+  background:
+    radial-gradient(circle at 90% -10%, rgba(232,137,168,.20), transparent 30%),
+    radial-gradient(circle at 10% 0%, rgba(199,154,75,.10), transparent 24%),
+    #f7f3f5;
+}
+.app-shell button,.app-shell input,.app-shell textarea{transition:all .2s ease}
+.app-shell ::selection{background:#f1c6d6;color:#5f2340}
+.app-shell ::-webkit-scrollbar{width:9px;height:9px}
+.app-shell ::-webkit-scrollbar-thumb{background:#d8c3cd;border-radius:99px}
+.app-shell ::-webkit-scrollbar-track{background:transparent}
+
+/* Welcome */
+.hero{
+  min-height:100vh;
+  padding:clamp(2rem,6vw,5rem) clamp(1.2rem,7vw,7rem);
+  background:
+    radial-gradient(circle at 76% 18%, rgba(255,255,255,.85) 0 5%, transparent 24%),
+    radial-gradient(circle at 15% 85%, rgba(255,255,255,.7), transparent 30%),
+    linear-gradient(125deg,#fffafd 0%,#f8e1e9 53%,#f0dfcf 100%);
+}
+.hero-copy{max-width:570px}
+.hero-copy h1{font-size:clamp(3rem,6vw,5.2rem);letter-spacing:-.035em;line-height:.92;text-wrap:balance}
+.hero-copy>p{font-size:1.08rem;max-width:470px;color:#674d5b}
+.hero-decor{width:560px;height:560px;right:-190px;bottom:-220px;opacity:.82;filter:blur(0);background:linear-gradient(135deg,#a23c68,#d98aa1 55%,#c79a4b)}
+.hero-card{width:330px;padding:1rem;border-radius:28px;box-shadow:0 30px 80px rgba(91,37,67,.20);transform:rotate(4deg)}
+.hero-photo{height:285px;border-radius:21px;background:linear-gradient(145deg,#8d3158,#d77f9e 55%,#d1aa62);padding:1.25rem}
+.hero-card strong{font-size:1.25rem;margin-top:1.15rem}
+.hero-card span{font-size:.85rem}
+.choice-card{padding:1.15rem 1.25rem;border-radius:18px;background:rgba(255,255,255,.86);box-shadow:0 12px 30px rgba(91,37,67,.07);backdrop-filter:blur(8px)}
+.choice-card:hover{transform:translateY(-3px);box-shadow:0 16px 35px rgba(91,37,67,.13);border-color:#d28aa5}
+
+/* Login */
+.login{background:radial-gradient(circle at 20% 20%,#fff,#f5e4eb 45%,#efe1d6)}
+.login-box{max-width:980px;border-radius:30px;box-shadow:0 35px 90px rgba(73,32,54,.20);border:1px solid rgba(255,255,255,.8)}
+.login-art{padding:3.3rem;background:linear-gradient(155deg,#7f2c51 0%,#a23c68 55%,#c97591 100%);position:relative;overflow:hidden}
+.login-art:after{content:"";position:absolute;width:300px;height:300px;border-radius:50%;right:-130px;bottom:-140px;background:rgba(255,255,255,.10)}
+.login-art h2{font-size:2.55rem;position:relative;z-index:1}
+.login-form{padding:3.2rem}
+.login-form h3.form-title{font-size:2rem}
+
+/* Header + navigation */
+.appbar{height:76px;padding:0 2rem;background:rgba(255,255,255,.88);backdrop-filter:blur(16px);box-shadow:0 1px 0 rgba(234,223,229,.9);position:sticky;top:0;z-index:30}
+.brand-label{letter-spacing:.12em}
+.brand-photo{width:34px;height:34px;box-shadow:0 5px 14px rgba(91,37,67,.16)}
+.sidebar{width:235px;padding:1.5rem 1.1rem;background:rgba(255,255,255,.86);backdrop-filter:blur(15px);box-shadow:8px 0 30px rgba(91,37,67,.035)}
+.side-primary{border-radius:15px;padding:.85rem 1rem;background:linear-gradient(135deg,#3d2736,#5a3047);box-shadow:0 10px 20px rgba(58,39,53,.16);margin-bottom:1.2rem}
+.side-primary:hover{transform:translateY(-2px);box-shadow:0 13px 24px rgba(58,39,53,.22)}
+.side-link{padding:.72rem .78rem;border-radius:13px}
+.side-link:hover{transform:translateX(2px)}
+.side-link-active{background:linear-gradient(135deg,#f8e2eb,#fbf0e8);box-shadow:inset 0 0 0 1px rgba(162,60,104,.08)}
+.main{padding:2.1rem 2.4rem;max-width:1600px;width:100%;margin:0 auto}
+
+/* Cards / panels */
+.panel{background:rgba(255,255,255,.92);border:1px solid rgba(234,223,229,.95);border-radius:22px;padding:1.75rem;box-shadow:0 12px 35px rgba(91,37,67,.055);backdrop-filter:blur(8px)}
+.panel+.panel{margin-top:1rem}
+.section-title{font-size:1.2rem}
+.stat-card{background:linear-gradient(145deg,#fff,#f9f0f4);border-radius:17px;padding:1.15rem;box-shadow:0 8px 20px rgba(91,37,67,.05)}
+.stat-num{font-size:1.8rem;color:#3a2735}
+
+/* Controls */
+.input,.textarea{background:#fff;border-color:#e6d9e0;border-radius:13px;box-shadow:0 2px 8px rgba(91,37,67,.025)}
+.input:hover,.textarea:hover{border-color:#d7b4c4}
+.input:focus,.textarea:focus{border-color:var(--berry);box-shadow:0 0 0 4px rgba(162,60,104,.10)}
+.btn-primary{padding:.82rem 1.5rem;background:linear-gradient(135deg,#a23c68,#8a3157);box-shadow:0 10px 22px rgba(162,60,104,.25)}
+.btn-primary:hover{background:linear-gradient(135deg,#8f315b,#762646);transform:translateY(-1px);box-shadow:0 13px 26px rgba(162,60,104,.30)}
+.btn-ghost{background:#fff}
+.btn-ghost:hover{background:#fbf2f6;transform:translateY(-1px)}
+.tab-row{border:1px solid var(--line);box-shadow:inset 0 1px 2px rgba(91,37,67,.04)}
+.tab-btn-active{background:#fff;box-shadow:0 4px 12px rgba(91,37,67,.08)}
+
+/* Booking / service cards */
+.service-card,.option-row,.slot-btn,.appt-row{background:linear-gradient(145deg,#fff,#faf4f7);box-shadow:0 6px 16px rgba(91,37,67,.04)}
+.service-card{border-radius:17px;padding:1rem}
+.service-card:hover{transform:translateY(-3px);box-shadow:0 12px 24px rgba(91,37,67,.10);border-color:#d89ab1}
+.slot-btn:hover{transform:translateY(-2px);box-shadow:0 7px 14px rgba(91,37,67,.08)}
+.slot-btn-active{box-shadow:0 8px 18px rgba(162,60,104,.22)}
+.confirm-box{background:linear-gradient(145deg,#fff,#f9eef3);box-shadow:0 10px 25px rgba(91,37,67,.06)}
+
+/* Calendar */
+.cal{background:transparent}
+.cal-day{background:#fff;border-color:#eee3e8;box-shadow:0 2px 6px rgba(91,37,67,.025)}
+.cal-day:hover{transform:translateY(-1px);box-shadow:0 6px 12px rgba(91,37,67,.08)}
+.cal-day-selected{background:linear-gradient(145deg,#a23c68,#8b3158);box-shadow:0 8px 16px rgba(162,60,104,.24)}
+.cal-badge{box-shadow:0 2px 5px rgba(91,37,67,.12)}
+
+/* Lists / promotions */
+.appt-row{border-radius:15px}
+.appt-row:hover{transform:translateY(-1px);box-shadow:0 8px 18px rgba(91,37,67,.07)}
+.promo-card{border-radius:18px;background:#fff;box-shadow:0 9px 24px rgba(91,37,67,.06)}
+.promo-thumb{background:#f1e4ea}
+.summary-bar{background:linear-gradient(135deg,#fbf1f5,#fff);box-shadow:0 5px 16px rgba(91,37,67,.04)}
+
+/* Small polish */
+.icon-btn:hover{background:#fbf1f5;border-color:#d8b7c5;color:var(--berry);transform:translateY(-1px)}
+.chip:hover{border-color:#d29ab0}
+.chip-active{box-shadow:0 6px 14px rgba(162,60,104,.18)}
+.modal-card{border-radius:24px;box-shadow:0 35px 90px rgba(46,20,33,.25)}
+
+@media (max-width:900px){
+  .hero{gap:2rem}.hero-card{width:290px}.sidebar{width:205px}.main{padding:1.5rem}
+}
+@media (max-width:760px){
+  .hero{padding:2.3rem 1.1rem 7rem;min-height:100vh}
+  .hero-copy h1{font-size:3.2rem}
+  .hero-card{width:min(330px,92vw);transform:none}
+  .appbar{height:66px;padding:0 1rem}
+  .main{padding:1rem .85rem 7rem}
+  .panel{border-radius:18px;padding:1.2rem}
+}
+
 `;
 
 /* ---------------------------------- Calendario ---------------------------------- */
