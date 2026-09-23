@@ -1510,11 +1510,25 @@ function ClientPromotions({ promotions, onUsePromo }) {
   );
 }
 
-function ClientApp({ data, persist, session, onLogout }) {
+function ClientApp({ data, persist, session, onLogout, onRefreshPromotions }) {
   const [tab, setTab] = useState("reservar");
   const [activePromo, setActivePromo] = useState(null);
   const [bookingKey, setBookingKey] = useState(0);
   const client = data.clients.find((c) => c.id === session.id);
+
+  // Actualiza las promociones automáticamente mientras la clienta tiene su cuenta abierta.
+  // Así, cuando la administradora publica/oculta una promoción, aparece sin que la clienta
+  // tenga que cerrar sesión.
+  useEffect(() => {
+    if (!onRefreshPromotions) return undefined;
+    const timer = setInterval(() => {
+      onRefreshPromotions();
+    }, 10000);
+    return () => clearInterval(timer);
+  }, [onRefreshPromotions]);
+
+  const promotionNav = { key: "promociones", label: "Promociones", icon: Megaphone };
+
   return (
     <Shell
       title={data.businessName}
@@ -1522,6 +1536,7 @@ function ClientApp({ data, persist, session, onLogout }) {
       roleLabel="Cliente/a"
       nav={[
         { key: "reservar", label: "Reservar cita", icon: Calendar },
+        promotionNav,
         { key: "mis-citas", label: "Mis citas", icon: Clock },
       ]}
       active={tab} onNav={setTab} onLogout={onLogout}
@@ -1533,6 +1548,25 @@ function ClientApp({ data, persist, session, onLogout }) {
           onUsePromo={(p) => setActivePromo(p)}
         />
       )}
+
+      {tab === "promociones" && (
+        <div>
+          <h2 style={{ marginBottom: ".35rem" }}>Promociones para ti</h2>
+          <p className="main-subtitle">Aquí aparecen automáticamente las promociones publicadas por el salón.</p>
+          <ClientPromotions
+            promotions={data.promotions}
+            onUsePromo={(p) => { setActivePromo(p); setTab("reservar"); setBookingKey((k) => k + 1); }}
+          />
+          {(data.promotions || []).filter(isPromoVisible).length === 0 && (
+            <div className="panel empty-state">
+              <div className="arch-icon"><Megaphone size={24} /></div>
+              <h3>No hay promociones activas</h3>
+              <p>Cuando el salón publique una promoción vigente, aparecerá aquí automáticamente.</p>
+            </div>
+          )}
+        </div>
+      )}
+
       {tab === "reservar" && (
         <BookingWizard
           key={bookingKey}
@@ -3771,6 +3805,17 @@ export default function App() {
     return ok;
   }, [activeCompany, tenantWriteKey, tenantData]);
 
+  // La cuenta de la clienta consulta solo las promociones cada 10 segundos.
+  // No reemplazamos toda la información de la empresa para evitar interrumpir una reserva.
+  const refreshPromotions = useCallback(async () => {
+    if (!activeCompany || !companySession || companySession.type !== "cliente") return;
+    const res = await apiGetTenant(activeCompany.slug);
+    if (!res || res.__error || res.__notFound) return;
+    if (Array.isArray(res.promotions)) {
+      setTenantData((prev) => prev ? { ...prev, promotions: res.promotions } : prev);
+    }
+  }, [activeCompany, companySession]);
+
   function leaveCompany() {
     setActiveCompany(null);
     setTenantData(null);
@@ -3855,7 +3900,13 @@ export default function App() {
         />
       )}
       {view === "company" && tenantData && companySession?.type === "cliente" && (
-        <ClientApp data={tenantData} persist={persistTenant} session={companySession} onLogout={() => setCompanySession(null)} />
+        <ClientApp
+          data={tenantData}
+          persist={persistTenant}
+          session={companySession}
+          onRefreshPromotions={refreshPromotions}
+          onLogout={() => setCompanySession(null)}
+        />
       )}
       {view === "company" && tenantData && companySession?.type === "empleado" && (
         <TeamApp data={tenantData} persist={persistTenant} session={companySession} onLogout={() => setCompanySession(null)} />
