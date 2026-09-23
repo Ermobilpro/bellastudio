@@ -702,6 +702,42 @@ html, body, #root{ height:100%; margin:0; padding:0; }
 .appt-row{border-radius:17px}.appt-row:hover{box-shadow:0 10px 22px rgba(78,39,59,.09)}.stat-card{border-radius:18px}.stat-num{color:#8f2f5b}
 .empty-state{min-height:300px;display:flex;flex-direction:column;align-items:center;justify-content:center}.arch-icon{background:linear-gradient(145deg,#b74476,#8f2f5b);box-shadow:0 12px 24px rgba(143,47,91,.22)}
 .promo-card{border-radius:20px;box-shadow:0 12px 28px rgba(78,39,59,.075)}.promo-banner{background:linear-gradient(90deg,#f9e7ef,#f9f0df);border:1px solid #efdae4}
+
+/* ===== Promociones para clientas — estilo redes sociales ===== */
+.client-promotions-page{max-width:1180px;margin:0 auto}
+.client-promo-hero{display:flex;align-items:center;justify-content:space-between;gap:1rem;margin-bottom:1.25rem;padding:1.35rem 1.5rem;border-radius:24px;background:linear-gradient(135deg,#fff 0%,#f9e6ef 58%,#f7eadb 100%);border:1px solid #ead8e1;box-shadow:0 15px 35px rgba(78,39,59,.07)}
+.client-promo-eyebrow{display:inline-flex;align-items:center;gap:.35rem;color:#a33e6b;font-size:.72rem;font-weight:900;letter-spacing:.12em}
+.client-promo-hero h2{margin:.3rem 0 .25rem;font-family:Georgia,serif;font-size:1.8rem;color:#342732}
+.client-promo-hero p{margin:0;color:#806f7d;font-size:.9rem}
+.client-promo-count{min-width:64px;height:64px;border-radius:20px;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#a23c68;color:#fff;font-family:Georgia,serif;font-size:1.45rem;box-shadow:0 12px 24px rgba(162,60,104,.22)}
+.client-promo-count span{font-family:Nunito,sans-serif;font-size:.62rem;font-weight:800;text-transform:uppercase;letter-spacing:.08em;opacity:.85}
+.client-promo-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(285px,1fr));gap:1.15rem}
+.client-promo-card{overflow:hidden;border:1px solid #eadfe5;border-radius:24px;background:#fff;box-shadow:0 14px 35px rgba(78,39,59,.08);transition:transform .2s ease,box-shadow .2s ease}
+.client-promo-card:hover{transform:translateY(-5px);box-shadow:0 22px 45px rgba(78,39,59,.13)}
+.client-promo-media{height:225px;position:relative;overflow:hidden;background:linear-gradient(135deg,#8f2f5b,#d98aa5 60%,#d2a85d)}
+.client-promo-media img{width:100%;height:100%;display:block;object-fit:cover;transition:transform .35s ease}
+.client-promo-card:hover .client-promo-media img{transform:scale(1.045)}
+.client-promo-no-image{height:100%;display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,.88)}
+.client-promo-badge{position:absolute;top:13px;left:13px;padding:.35rem .65rem;border-radius:999px;background:rgba(255,255,255,.92);color:#8f2f5b;font-size:.65rem;font-weight:900;letter-spacing:.08em;box-shadow:0 6px 14px rgba(0,0,0,.12)}
+.client-promo-discount{position:absolute;right:13px;top:13px;padding:.45rem .65rem;border-radius:12px;background:#d5a24b;color:#fff;font-weight:900;font-size:.82rem;box-shadow:0 7px 15px rgba(0,0,0,.15)}
+.client-promo-content{padding:1.1rem 1.1rem 1.15rem}
+.client-promo-title-row{display:flex;align-items:flex-start;justify-content:space-between;gap:.6rem}
+.client-promo-title-row h3{font-family:Georgia,serif;font-size:1.25rem;color:#302630;line-height:1.1;margin:0}
+.client-promo-title-row svg{color:#d09a45;flex-shrink:0}
+.client-promo-description{margin:.5rem 0 0;color:#786b75;font-size:.86rem;line-height:1.5;white-space:pre-wrap}
+.client-promo-services{display:flex;flex-wrap:wrap;gap:.35rem;margin:.75rem 0 .35rem}
+.client-promo-services span{padding:.3rem .55rem;border-radius:999px;background:#f8e8ef;color:#96375f;font-size:.68rem;font-weight:800}
+.client-promo-price{display:flex;align-items:baseline;gap:.55rem;margin-top:.75rem}
+.client-promo-price strong{font-family:Georgia,serif;font-size:1.55rem;color:#8f2f5b}
+.client-promo-old-price{text-decoration:line-through;color:#a99ba3;font-size:.78rem;font-weight:700}
+.client-promo-validity{display:flex;align-items:flex-start;gap:.35rem;margin-top:.35rem;color:#887783;font-size:.73rem;line-height:1.35}
+.client-promo-validity svg{flex-shrink:0;margin-top:1px}
+.client-promo-cta{width:100%;margin-top:1rem;border:0;border-radius:14px;padding:.78rem 1rem;display:flex;align-items:center;justify-content:center;gap:.35rem;background:linear-gradient(135deg,#b74476,#8f2f5b);color:#fff;font-family:inherit;font-weight:800;cursor:pointer;box-shadow:0 9px 18px rgba(143,47,91,.20);transition:.18s ease}
+.client-promo-cta:hover{transform:translateY(-1px);box-shadow:0 12px 23px rgba(143,47,91,.27)}
+.client-promo-empty{max-width:700px;margin:2rem auto;text-align:center;padding:3rem 1.5rem}
+.client-promo-empty-icon{width:62px;height:62px;margin:0 auto 1rem;border-radius:20px;display:flex;align-items:center;justify-content:center;background:#f8e5ee;color:#a33e6b}
+.client-promo-empty h2{font-family:Georgia,serif;margin:0 0 .35rem}
+.client-promo-empty p{margin:0 auto;color:#806f7d;max-width:430px}
 @media(max-width:760px){.appbar{height:68px;padding:0 1rem}.sidebar{width:100%;background:#3b2231;padding:.3rem .3rem calc(.3rem + env(safe-area-inset-bottom,0px))}.sidebar:before{display:none}.side-link{color:#806f7d}.side-link-active{color:#a33e6b;background:#f8e5ee;box-shadow:none}.main{padding:1rem .85rem 7rem}.main:before{display:none}.cal-day{min-height:48px}}
 
 `;
@@ -1482,53 +1518,74 @@ function MyAppointments({ data, persist, clientId }) {
   );
 }
 
-function ClientPromotions({ promotions, onUsePromo }) {
+function promoSavings(data, promo) {
+  if (!promo || promo.price == null) return null;
+  const ids = promoServiceIds(promo);
+  const prices = ids.map((id) => data.services.find((s) => s.id === id)?.price).filter((v) => typeof v === "number" && v > 0);
+  if (prices.length !== 1) return null;
+  const original = prices[0];
+  const saving = Math.round(((original - Number(promo.price)) / original) * 100);
+  return saving > 0 ? saving : null;
+}
+
+function ClientPromotions({ data, promotions, onUsePromo }) {
   const active = (promotions || []).filter(isPromoVisible);
-  if (active.length === 0) return null;
+  if (active.length === 0) {
+    return (
+      <div className="panel client-promo-empty">
+        <div className="client-promo-empty-icon"><Megaphone size={24} /></div>
+        <h2>No hay promociones activas</h2>
+        <p>Cuando la administradora publique una promoción, aparecerá aquí automáticamente.</p>
+      </div>
+    );
+  }
   return (
-    <div className="promo-strip">
-      <h3 className="section-title">Promociones</h3>
-      <div className="promo-grid">
-        {active.map((p) => (
-          <div key={p.id} className="promo-card">
-            {p.image && <img src={p.image} alt={p.title} className="promo-thumb" />}
-            <div className="promo-body">
-              <div className="promo-title">{p.title}</div>
-              {p.description && <div className="promo-desc">{p.description}</div>}
-              {p.price != null && <div className="appt-meta">Valor: {money(p.price)}</div>}
-              <div className="appt-meta">{promoValidityLabel(p)}</div>
-            </div>
-            {promoServiceIds(p).length > 0 && (
-              <div className="promo-actions">
-                <button className="btn-primary" onClick={() => onUsePromo(p)}>Pedir con esta promoción</button>
+    <div className="client-promotions-page">
+      <div className="client-promo-hero">
+        <div>
+          <span className="client-promo-eyebrow"><Megaphone size={14} /> OFERTAS ESPECIALES</span>
+          <h2>Promociones para ti</h2>
+          <p>Descubre las ofertas disponibles y reserva tu cita directamente desde aquí.</p>
+        </div>
+        <div className="client-promo-count">{active.length}<span>activas</span></div>
+      </div>
+      <div className="client-promo-grid">
+        {active.map((p) => {
+          const saving = promoSavings(data, p);
+          const ids = promoServiceIds(p);
+          const serviceNames = ids.map((id) => data.services.find((s) => s.id === id)?.name).filter(Boolean);
+          const originalPrice = ids.length === 1 ? data.services.find((s) => s.id === ids[0])?.price : null;
+          return (
+            <article key={p.id} className="client-promo-card">
+              <div className="client-promo-media">
+                {p.image ? <img src={p.image} alt={p.title} /> : <div className="client-promo-no-image"><Megaphone size={42} /></div>}
+                <div className="client-promo-badge">OFERTA</div>
+                {saving && <div className="client-promo-discount">-{saving}%</div>}
               </div>
-            )}
-          </div>
-        ))}
+              <div className="client-promo-content">
+                <div className="client-promo-title-row"><h3>{p.title}</h3><Star size={17} fill="currentColor" /></div>
+                {p.description && <p className="client-promo-description">{p.description}</p>}
+                {serviceNames.length > 0 && <div className="client-promo-services">{serviceNames.map((name) => <span key={name}>{name}</span>)}</div>}
+                <div className="client-promo-price">
+                  {p.price != null ? <>{saving && originalPrice != null && <span className="client-promo-old-price">{money(originalPrice)}</span>}<strong>{money(p.price)}</strong></> : <strong>Oferta especial</strong>}
+                </div>
+                <div className="client-promo-validity"><Clock size={14} /> {promoValidityLabel(p)}</div>
+                <button className="client-promo-cta" onClick={() => onUsePromo(p)}>Reservar con esta promoción <ChevronRight size={17} /></button>
+              </div>
+            </article>
+          );
+        })}
       </div>
     </div>
   );
 }
 
-function ClientApp({ data, persist, session, onLogout, onRefreshPromotions }) {
+function ClientApp({ data, persist, session, onLogout }) {
   const [tab, setTab] = useState("reservar");
   const [activePromo, setActivePromo] = useState(null);
   const [bookingKey, setBookingKey] = useState(0);
   const client = data.clients.find((c) => c.id === session.id);
-
-  // Actualiza las promociones automáticamente mientras la clienta tiene su cuenta abierta.
-  // Así, cuando la administradora publica/oculta una promoción, aparece sin que la clienta
-  // tenga que cerrar sesión.
-  useEffect(() => {
-    if (!onRefreshPromotions) return undefined;
-    const timer = setInterval(() => {
-      onRefreshPromotions();
-    }, 10000);
-    return () => clearInterval(timer);
-  }, [onRefreshPromotions]);
-
-  const promotionNav = { key: "promociones", label: "Promociones", icon: Megaphone };
-
+  const activePromoCount = (data.promotions || []).filter(isPromoVisible).length;
   return (
     <Shell
       title={data.businessName}
@@ -1536,45 +1593,18 @@ function ClientApp({ data, persist, session, onLogout, onRefreshPromotions }) {
       roleLabel="Cliente/a"
       nav={[
         { key: "reservar", label: "Reservar cita", icon: Calendar },
-        promotionNav,
+        { key: "promociones", label: activePromoCount ? `Promociones · ${activePromoCount}` : "Promociones", icon: Megaphone },
         { key: "mis-citas", label: "Mis citas", icon: Clock },
       ]}
       active={tab} onNav={setTab} onLogout={onLogout}
       primaryAction={{ label: "Nueva cita", onClick: () => { setActivePromo(null); setTab("reservar"); setBookingKey((k) => k + 1); } }}
     >
+      {tab === "promociones" && <ClientPromotions data={data} promotions={data.promotions} onUsePromo={(p) => { setActivePromo(p); setTab("reservar"); setBookingKey((k) => k + 1); }} />}
       {tab === "reservar" && (
-        <ClientPromotions
-          promotions={data.promotions}
-          onUsePromo={(p) => setActivePromo(p)}
-        />
-      )}
-
-      {tab === "promociones" && (
-        <div>
-          <h2 style={{ marginBottom: ".35rem" }}>Promociones para ti</h2>
-          <p className="main-subtitle">Aquí aparecen automáticamente las promociones publicadas por el salón.</p>
-          <ClientPromotions
-            promotions={data.promotions}
-            onUsePromo={(p) => { setActivePromo(p); setTab("reservar"); setBookingKey((k) => k + 1); }}
-          />
-          {(data.promotions || []).filter(isPromoVisible).length === 0 && (
-            <div className="panel empty-state">
-              <div className="arch-icon"><Megaphone size={24} /></div>
-              <h3>No hay promociones activas</h3>
-              <p>Cuando el salón publique una promoción vigente, aparecerá aquí automáticamente.</p>
-            </div>
-          )}
-        </div>
-      )}
-
-      {tab === "reservar" && (
-        <BookingWizard
-          key={bookingKey}
-          data={data} persist={persist} clientId={client.id}
-          promo={activePromo}
-          onClearPromo={() => setActivePromo(null)}
-          onBooked={() => { setActivePromo(null); setTab("mis-citas"); }}
-        />
+        <>
+          <ClientPromotions data={data} promotions={data.promotions} onUsePromo={(p) => { setActivePromo(p); setBookingKey((k) => k + 1); }} />
+          <BookingWizard key={bookingKey} data={data} persist={persist} clientId={client.id} promo={activePromo} onClearPromo={() => setActivePromo(null)} onBooked={() => { setActivePromo(null); setTab("mis-citas"); }} />
+        </>
       )}
       {tab === "mis-citas" && <MyAppointments data={data} persist={persist} clientId={client.id} />}
     </Shell>
@@ -3805,17 +3835,6 @@ export default function App() {
     return ok;
   }, [activeCompany, tenantWriteKey, tenantData]);
 
-  // La cuenta de la clienta consulta solo las promociones cada 10 segundos.
-  // No reemplazamos toda la información de la empresa para evitar interrumpir una reserva.
-  const refreshPromotions = useCallback(async () => {
-    if (!activeCompany || !companySession || companySession.type !== "cliente") return;
-    const res = await apiGetTenant(activeCompany.slug);
-    if (!res || res.__error || res.__notFound) return;
-    if (Array.isArray(res.promotions)) {
-      setTenantData((prev) => prev ? { ...prev, promotions: res.promotions } : prev);
-    }
-  }, [activeCompany, companySession]);
-
   function leaveCompany() {
     setActiveCompany(null);
     setTenantData(null);
@@ -3900,13 +3919,7 @@ export default function App() {
         />
       )}
       {view === "company" && tenantData && companySession?.type === "cliente" && (
-        <ClientApp
-          data={tenantData}
-          persist={persistTenant}
-          session={companySession}
-          onRefreshPromotions={refreshPromotions}
-          onLogout={() => setCompanySession(null)}
-        />
+        <ClientApp data={tenantData} persist={persistTenant} session={companySession} onLogout={() => setCompanySession(null)} />
       )}
       {view === "company" && tenantData && companySession?.type === "empleado" && (
         <TeamApp data={tenantData} persist={persistTenant} session={companySession} onLogout={() => setCompanySession(null)} />
