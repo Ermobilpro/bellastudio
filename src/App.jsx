@@ -669,6 +669,41 @@ html, body, #root{ height:100%; margin:0; padding:0; }
   .panel{border-radius:18px;padding:1.2rem}
 }
 
+/* ================= NUEVO DISEÑO VISUAL — BELLASTUDIO ================= */
+.app-shell{background:#f6f2f5;color:#302630}
+.app-frame{background:linear-gradient(135deg,#f8f4f7 0%,#f4eef3 100%)}
+.appbar{height:78px;padding:0 2.2rem;background:rgba(255,255,255,.94);border-bottom:1px solid #eadde5;box-shadow:0 8px 28px rgba(83,42,64,.07);backdrop-filter:blur(18px)}
+.brand-label{font-size:.8rem;letter-spacing:.18em;color:#9b3c68}
+.brand-photo{width:40px;height:40px;border:3px solid #fff;box-shadow:0 6px 18px rgba(155,60,104,.20)}
+.profile{gap:.8rem}.profile > span:first-child{font-weight:700;color:#51434d}
+.role-chip{background:#f8e5ee;color:#a33e6b;padding:.32rem .7rem}
+.avatar{width:40px;height:40px;background:linear-gradient(135deg,#f2bfd2,#e99bb8);color:#8d3159;box-shadow:0 5px 14px rgba(155,60,104,.15)}
+.shell{gap:0}
+.sidebar{width:245px;padding:1.4rem 1rem;background:linear-gradient(180deg,#4b263b 0%,#351f2d 100%);border-right:0;box-shadow:10px 0 30px rgba(50,25,40,.13)}
+.sidebar:before{content:"BELLEZA · AGENDA · CLIENTAS";display:block;color:#dcb2c5;font-size:.62rem;letter-spacing:.16em;font-weight:800;padding:.15rem .75rem 1.1rem}
+.side-primary{background:linear-gradient(135deg,#d86693,#b84472);border:1px solid rgba(255,255,255,.16);border-radius:14px;box-shadow:0 12px 24px rgba(0,0,0,.18)}
+.side-primary:hover{background:linear-gradient(135deg,#e0729d,#bd4b79)}
+.side-link{color:#ddcbd4;border-radius:13px;padding:.76rem .8rem;margin:.08rem 0}.side-link svg{color:#d9afc0}
+.side-link:hover{background:rgba(255,255,255,.09);color:#fff;transform:translateX(3px)}.side-link:hover svg{color:#f1c3d4}
+.side-link-active{background:linear-gradient(90deg,rgba(226,101,148,.25),rgba(255,255,255,.07));color:#fff;box-shadow:inset 3px 0 #e978a2}.side-link-active svg{color:#f3a6c1}
+.side-logout{color:#e6a6ba;margin-top:auto}
+.main{padding:2rem 2.4rem;background:radial-gradient(circle at 95% 0%,rgba(226,119,159,.12),transparent 25%),linear-gradient(135deg,#f8f5f7,#f4eef3)}
+.main:before{content:"";display:block;height:4px;width:64px;border-radius:10px;background:linear-gradient(90deg,#bd4d79,#e49a55);margin-bottom:1rem}
+.panel{background:rgba(255,255,255,.96);border:1px solid #eadfe5;border-radius:24px;padding:1.7rem;box-shadow:0 18px 45px rgba(78,39,59,.075)}
+.section-title{font-size:1.22rem;color:#352936}.main-subtitle{color:#887783}
+.cal{background:transparent;padding:.2rem}.cal-head{margin-bottom:1rem}.cal-title{font-family:Georgia,serif;font-size:1.12rem;color:#352936}
+.icon-btn{width:36px;height:36px;border-radius:12px;background:#fff;border:1px solid #eadde5;box-shadow:0 4px 12px rgba(78,39,59,.06)}.icon-btn:hover{background:#fbecf3;color:#a33e6b}
+.cal-grid{gap:.55rem}.cal-weekday{color:#9a8993;font-size:.7rem;letter-spacing:.04em;text-transform:uppercase}.cal-cell{border-radius:14px}
+.cal-day{min-height:58px;background:#fff;border:1px solid #eee4e9;box-shadow:0 5px 12px rgba(78,39,59,.045);transition:.18s ease}.cal-day:hover{border-color:#d98baa;box-shadow:0 10px 18px rgba(163,62,107,.11);transform:translateY(-2px)}
+.cal-day-num{font-size:.9rem;color:#3e323a}.cal-day-today{box-shadow:inset 0 0 0 2px #d5a24b}.cal-day-selected{background:linear-gradient(145deg,#b54475,#8f2f5b);border-color:#a63b69;box-shadow:0 12px 22px rgba(143,47,91,.28)}.cal-day-selected .cal-day-num{color:#fff}.cal-badge{background:#d8a24b}
+.btn-primary{background:linear-gradient(135deg,#b74476,#8f2f5b);border-radius:13px;padding:.82rem 1.45rem;box-shadow:0 10px 22px rgba(143,47,91,.23)}.btn-primary:hover{background:linear-gradient(135deg,#c54e7e,#7e264d)}
+.input,.textarea{border-radius:13px;background:#fff;border-color:#e5d8e0}.input:focus,.textarea:focus{box-shadow:0 0 0 4px rgba(183,68,118,.10)}
+.service-card,.option-row,.slot-btn,.appt-row,.stat-card{background:#fff;border-color:#eadfe5;box-shadow:0 7px 18px rgba(78,39,59,.055)}.service-card{border-radius:18px}.service-card:hover{transform:translateY(-4px);box-shadow:0 15px 26px rgba(78,39,59,.11)}
+.appt-row{border-radius:17px}.appt-row:hover{box-shadow:0 10px 22px rgba(78,39,59,.09)}.stat-card{border-radius:18px}.stat-num{color:#8f2f5b}
+.empty-state{min-height:300px;display:flex;flex-direction:column;align-items:center;justify-content:center}.arch-icon{background:linear-gradient(145deg,#b74476,#8f2f5b);box-shadow:0 12px 24px rgba(143,47,91,.22)}
+.promo-card{border-radius:20px;box-shadow:0 12px 28px rgba(78,39,59,.075)}.promo-banner{background:linear-gradient(90deg,#f9e7ef,#f9f0df);border:1px solid #efdae4}
+@media(max-width:760px){.appbar{height:68px;padding:0 1rem}.sidebar{width:100%;background:#3b2231;padding:.3rem .3rem calc(.3rem + env(safe-area-inset-bottom,0px))}.sidebar:before{display:none}.side-link{color:#806f7d}.side-link-active{color:#a33e6b;background:#f8e5ee;box-shadow:none}.main{padding:1rem .85rem 7rem}.main:before{display:none}.cal-day{min-height:48px}}
+
 `;
 
 /* ---------------------------------- Calendario ---------------------------------- */
