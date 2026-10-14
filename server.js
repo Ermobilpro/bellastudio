@@ -249,7 +249,8 @@ function findClient(data, clientId, phone) {
 const LOG_MAX = 1000;
 function savePublicChange(slug, data, entry) {
   const rev = (data._rev || 0) + 1;
-  const log = [...(data._publicLog || []), { ...entry, rev }].slice(-LOG_MAX);
+  const entries = Array.isArray(entry) ? entry : [entry];
+  const log = [...(data._publicLog || []), ...entries.map((en) => ({ ...en, rev }))].slice(-LOG_MAX);
   const next = { ...data, _rev: rev, _publicLog: log };
   writeJSON(tenantFile(slug), next);
   return next;
@@ -263,6 +264,12 @@ function applyLog(target, entries) {
       if (!out.appointments.some((a) => a.id === en.appt.id)) out.appointments.push(en.appt);
     } else if (en.op === "patchAppt") {
       out.appointments = out.appointments.map((a) => (a.id === en.id ? { ...a, ...en.patch } : a));
+    } else if (en.op === "addVenta") {
+      const ventas = out.ventas || [];
+      if (!ventas.some((v) => v.id === en.venta.id || v.appointmentId === en.venta.appointmentId)) out.ventas = [...ventas, en.venta];
+      out.nextConsecutivo = Math.max(out.nextConsecutivo || 1, en.venta.consecutivo + 1);
+    } else if (en.op === "addPoints") {
+      out.clients = out.clients.map((c) => (c.id === en.clientId ? { ...c, points: (c.points || 0) + en.points } : c));
     }
   }
   return out;
@@ -417,6 +424,58 @@ app.post("/api/tenant/:slug/team/setup", (req, res) => {
   const next = { ...data, employees: [admin], _rev: (data._rev || 0) + 1 };
   writeJSON(tenantFile(slug), next);
   res.json({ token: signToken(slug, admin.id), employee: stripEmployee(admin) });
+});
+
+// Marcar una cita como cumplida: el servidor genera el comprobante con el
+// siguiente consecutivo (nunca se repite aunque dos personas completen citas
+// al mismo tiempo) y suma los puntos de fidelidad a la clienta.
+app.post("/api/tenant/:slug/team/appointments/:id/complete", (req, res) => {
+  const slug = req.params.slug;
+  const data = readJSON(tenantFile(slug));
+  if (!data) return res.status(404).json({ error: "Empresa sin datos" });
+  const who = whoIs(req, slug, data);
+  if (who.level === "public") return res.status(401).json({ error: "Tu sesión se cerró. Vuelve a ingresar." });
+  const appt = (data.appointments || []).find((a) => a.id === req.params.id);
+  if (!appt) return res.status(404).json({ error: "Cita no encontrada." });
+  if (who.level === "team" && !who.isAdmin && appt.employeeId !== who.employeeId) return res.status(403).json({ error: "Esta cita no es tuya." });
+  if (appt.status === "cancelada" || appt.status === "rechazada") return res.status(400).json({ error: "Una cita cancelada no se puede completar." });
+  const existing = (data.ventas || []).find((v) => v.appointmentId === appt.id && v.status !== "anulada");
+  if (existing) return res.json({ venta: existing, data: teamView(data), yaExistia: true });
+
+  const client = (data.clients || []).find((c) => c.id === appt.clientId);
+  const emp = (data.employees || []).find((e) => e.id === appt.employeeId);
+  const items = [
+    { name: appt.serviceName, price: Number(appt.price) || 0 },
+    ...(appt.extras || []).map((e) => ({ name: e.serviceName, price: Number(e.price) || 0 })),
+  ];
+  const total = items.reduce((sum, it) => sum + it.price, 0);
+  const maxUsado = Math.max(0, ...(data.ventas || []).map((v) => Number(v.consecutivo) || 0));
+  const consecutivo = Math.max(data.nextConsecutivo || 1, maxUsado + 1);
+  const venta = {
+    id: uid(), consecutivo, appointmentId: appt.id,
+    clientId: appt.clientId, clientName: client?.name || "", clientPhone: client?.phone || "",
+    employeeId: appt.employeeId, employeeName: emp?.name || "",
+    serviceId: appt.serviceId, serviceName: appt.serviceName,
+    items, price: total, date: appt.date, time: appt.time, createdAt: Date.now(), status: "activa",
+  };
+  const entries = [
+    { op: "patchAppt", id: appt.id, patch: { status: "completada" } },
+    { op: "addVenta", venta },
+  ];
+  let next = {
+    ...data,
+    appointments: data.appointments.map((a) => (a.id === appt.id ? { ...a, status: "completada" } : a)),
+    ventas: [...(data.ventas || []), venta],
+    nextConsecutivo: consecutivo + 1,
+  };
+  const rate = data.pointsPerThousand != null ? Number(data.pointsPerThousand) : 1;
+  const points = rate > 0 ? Math.floor((total / 1000) * rate) : 0;
+  if (points > 0 && client) {
+    next.clients = next.clients.map((c) => (c.id === client.id ? { ...c, points: (c.points || 0) + points } : c));
+    entries.push({ op: "addPoints", clientId: client.id, points });
+  }
+  next = savePublicChange(slug, next, entries);
+  res.json({ venta, data: teamView(next) });
 });
 
 /* ---------------------------- Clientas (sin registro) ---------------------------- */
