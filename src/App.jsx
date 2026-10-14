@@ -39,6 +39,179 @@ function money(n) {
 function todayISO() { return toISO(new Date()); }
 function initialOf(name) { return (name || "?").trim().charAt(0).toUpperCase(); }
 
+/* ---- Teléfonos y WhatsApp ---- */
+// Deja solo los dígitos y quita el indicativo 57 para comparar celulares
+// sin importar cómo los escribió la clienta ("300 123 4567", "+57 300...", etc.).
+function normPhone(p) {
+  let d = String(p || "").replace(/\D/g, "");
+  if (d.length === 12 && d.startsWith("57")) d = d.slice(2);
+  return d;
+}
+// wa.me exige el número en formato internacional. Un celular colombiano
+// guardado como "3001234567" se convierte en "573001234567".
+function waPhone(p) {
+  const d = String(p || "").replace(/\D/g, "");
+  if (d.length === 10 && d.startsWith("3")) return "57" + d;
+  return d;
+}
+function openWhatsApp(phone, msg) {
+  const num = waPhone(phone);
+  const url = num
+    ? `https://wa.me/${num}?text=${encodeURIComponent(msg)}`
+    : `https://wa.me/?text=${encodeURIComponent(msg)}`;
+  window.open(url, "_blank");
+}
+function salonWhatsApp(data) {
+  return data.whatsappSalon || data.employees.find((e) => e.isAdmin && e.phone)?.phone || "";
+}
+function apptCode(a) { return String(a.id || "").slice(0, 6).toUpperCase(); }
+function prettyDate(iso) {
+  const d = fromISO(iso);
+  return `${WEEKDAYS_FULL[d.getDay()]} ${d.getDate()} de ${MONTHS[d.getMonth()].toLowerCase()} de ${d.getFullYear()}`;
+}
+function hour12(t) {
+  const [h, m] = t.split(":").map(Number);
+  const suf = h >= 12 ? "pm" : "am";
+  const hh = h % 12 === 0 ? 12 : h % 12;
+  return `${hh}:${pad2(m)} ${suf}`;
+}
+function comprobanteTexto(data, appt, client, empName) {
+  const estado = appt.status === "pendiente" ? "PENDIENTE de aprobación (horario especial)" : "CONFIRMADA";
+  return [
+    `*${data.businessName}* — Comprobante de cita`,
+    ``,
+    `Código: *${apptCode(appt)}*`,
+    `Clienta: ${client?.name || ""}`,
+    `Celular: ${client?.phone || ""}`,
+    `Servicio: ${appt.serviceName}${appt.promoTitle ? ` (promoción ${appt.promoTitle})` : ""}`,
+    `Fecha: ${prettyDate(appt.date)}`,
+    `Hora: ${hour12(appt.time)}`,
+    `Con: ${empName || "—"}`,
+    `Valor: ${money(appt.price)}`,
+    `Estado: ${estado}`,
+    ``,
+    `¡Gracias por reservar con nosotras!`,
+  ].join("\n");
+}
+
+function loadImage(src) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    const t = setTimeout(() => resolve(null), 2500);
+    img.onload = () => { clearTimeout(t); resolve(img); };
+    img.onerror = () => { clearTimeout(t); resolve(null); };
+    img.src = src;
+  });
+}
+// Dibuja el comprobante como imagen PNG (se puede compartir por WhatsApp como foto).
+async function comprobantePNG(data, appt, client, empName) {
+  const W = 900, H = 1180;
+  const c = document.createElement("canvas");
+  c.width = W; c.height = H;
+  const g = c.getContext("2d");
+  const berry = "#a33e6b", deep = "#5c2240", gold = "#b8925a", ink = "#3b2231", muted = "#806f7d";
+  g.fillStyle = "#fbf5f2"; g.fillRect(0, 0, W, H);
+  const grad = g.createLinearGradient(0, 0, W, 300);
+  grad.addColorStop(0, deep); grad.addColorStop(1, berry);
+  g.fillStyle = grad; g.fillRect(0, 0, W, 300);
+  const logo = await loadImage(LOGO_SRC);
+  if (logo) {
+    g.save(); g.beginPath(); g.arc(W / 2, 110, 62, 0, Math.PI * 2); g.closePath();
+    g.fillStyle = "#fff"; g.fill(); g.clip();
+    const r = Math.min(124 / logo.width, 124 / logo.height);
+    g.drawImage(logo, W / 2 - (logo.width * r) / 2, 110 - (logo.height * r) / 2, logo.width * r, logo.height * r);
+    g.restore();
+  }
+  g.textAlign = "center"; g.fillStyle = "#fff";
+  g.font = "bold 46px Nunito, Arial, sans-serif";
+  g.fillText(data.businessName || "BellaStudio", W / 2, logo ? 225 : 150);
+  g.font = "26px Nunito, Arial, sans-serif"; g.fillStyle = "#f9dce7";
+  g.fillText("Comprobante de cita", W / 2, logo ? 268 : 200);
+
+  // tarjeta
+  g.fillStyle = "#fff"; g.strokeStyle = "#ead8df"; g.lineWidth = 2;
+  const x = 60, y = 340, w = W - 120, h = 700;
+  g.beginPath(); g.roundRect ? g.roundRect(x, y, w, h, 28) : g.rect(x, y, w, h); g.fill(); g.stroke();
+
+  const pend = appt.status === "pendiente";
+  g.fillStyle = pend ? "#fff3dc" : "#e6f4ea";
+  g.beginPath(); g.roundRect ? g.roundRect(W / 2 - 170, y + 36, 340, 54, 27) : g.rect(W / 2 - 170, y + 36, 340, 54); g.fill();
+  g.fillStyle = pend ? "#8a5a00" : "#1e6b35"; g.font = "bold 26px Nunito, Arial, sans-serif";
+  g.fillText(pend ? "PENDIENTE DE APROBACIÓN" : "CITA CONFIRMADA", W / 2, y + 72);
+
+  g.fillStyle = muted; g.font = "22px Nunito, Arial, sans-serif";
+  g.fillText("Código", W / 2, y + 140);
+  g.fillStyle = berry; g.font = "bold 54px Nunito, Arial, sans-serif";
+  g.fillText(apptCode(appt), W / 2, y + 196);
+
+  const rows = [
+    ["Clienta", client?.name || ""],
+    ["Celular", client?.phone || ""],
+    ["Servicio", appt.serviceName],
+    ["Fecha", prettyDate(appt.date)],
+    ["Hora", hour12(appt.time)],
+    ["Profesional", empName || "—"],
+    ["Valor", money(appt.price) + (appt.promoTitle ? "  (promoción)" : "")],
+  ];
+  let yy = y + 260;
+  rows.forEach(([k, v], i) => {
+    if (i > 0) { g.strokeStyle = "#f1e4ea"; g.lineWidth = 1; g.beginPath(); g.moveTo(x + 40, yy - 38); g.lineTo(x + w - 40, yy - 38); g.stroke(); }
+    g.textAlign = "left"; g.fillStyle = muted; g.font = "24px Nunito, Arial, sans-serif";
+    g.fillText(k, x + 40, yy);
+    g.textAlign = "right"; g.fillStyle = ink; g.font = "bold 26px Nunito, Arial, sans-serif";
+    let val = String(v);
+    while (g.measureText(val).width > w - 260 && val.length > 4) val = val.slice(0, -2);
+    if (val !== String(v)) val = val.slice(0, -1) + "…";
+    g.fillText(val, x + w - 40, yy);
+    yy += 62;
+  });
+
+  g.textAlign = "center"; g.fillStyle = gold; g.font = "italic 24px Nunito, Arial, sans-serif";
+  g.fillText("Presenta este comprobante al llegar. ¡Te esperamos!", W / 2, H - 80);
+  g.fillStyle = muted; g.font = "18px Nunito, Arial, sans-serif";
+  g.fillText(`Generado el ${new Date().toLocaleString("es-CO")}`, W / 2, H - 45);
+
+  return new Promise((resolve) => c.toBlob((b) => resolve(b), "image/png"));
+}
+
+async function compartirComprobante(data, appt, client, empName) {
+  const blob = await comprobantePNG(data, appt, client, empName);
+  if (!blob) { window.alert("No se pudo generar el comprobante en este navegador."); return; }
+  const fileName = `cita-${apptCode(appt)}.png`;
+  const file = new File([blob], fileName, { type: "image/png" });
+  // En celulares (Android / iPhone) abre el menú de compartir: ahí se elige WhatsApp.
+  try {
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: "Comprobante de cita", text: `Mi cita en ${data.businessName} · código ${apptCode(appt)}` });
+      return;
+    }
+  } catch (err) {
+    if (err && err.name === "AbortError") return; // la clienta cerró el menú
+  }
+  // En computador: se descarga la imagen.
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = fileName;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+
+function ComprobanteActions({ data, appt, client, compact }) {
+  const empName = data.employees.find((e) => e.id === appt.employeeId)?.name || "";
+  const salon = salonWhatsApp(data);
+  const [busy, setBusy] = useState(false);
+  return (
+    <div className="row-gap" style={{ flexWrap: "wrap", justifyContent: compact ? "flex-start" : "center" }}>
+      <button className={compact ? "btn-ghost" : "btn-primary"} onClick={() => openWhatsApp(salon, comprobanteTexto(data, appt, client, empName))}>
+        <MessageCircle size={15} /> {salon ? "Enviar al salón por WhatsApp" : "Enviar por WhatsApp"}
+      </button>
+      <button className="btn-ghost" disabled={busy} onClick={async () => { setBusy(true); try { await compartirComprobante(data, appt, client, empName); } finally { setBusy(false); } }}>
+        <Download size={15} /> {busy ? "Generando…" : "Comprobante (imagen)"}
+      </button>
+    </div>
+  );
+}
+
 function defaultData() {
   return {
     businessName: "BellaStudio",
@@ -86,6 +259,15 @@ function compressImageFile(file, maxDim = 1000, quality = 0.72) {
     };
     reader.readAsDataURL(file);
   });
+}
+
+// Para no ofrecer horas que ya pasaron cuando la clienta elige el día de hoy.
+function isPastSlot(dateISO, startMin) {
+  const today = todayISO();
+  if (dateISO < today) return true;
+  if (dateISO > today) return false;
+  const now = new Date();
+  return startMin <= now.getHours() * 60 + now.getMinutes();
 }
 
 function employeeWorksOn(emp, dateISO) {
@@ -148,12 +330,16 @@ async function apiVerifyAdminKey(key) {
     return false;
   }
 }
-async function apiGetTenant(slug) {
+async function apiGetTenant(slug, auth = {}) {
   // Distingue "la empresa todavía no tiene datos" (404 confirmado) de un error
   // de red o del servidor, para nunca confundir un fallo de conexión con una
   // empresa nueva y terminar sembrando datos vacíos encima de datos reales.
   try {
-    const res = await fetch(`/api/tenant/${encodeURIComponent(slug)}`);
+    const headers = {};
+    if (auth.token) headers["x-team-token"] = auth.token;
+    if (auth.adminKey) headers["x-admin-key"] = auth.adminKey;
+    if (auth.clientId) { headers["x-client-id"] = auth.clientId; headers["x-client-phone"] = auth.phone || ""; }
+    const res = await fetch(`/api/tenant/${encodeURIComponent(slug)}`, { headers });
     if (res.status === 404) return { __notFound: true };
     if (!res.ok) return { __error: true };
     return await res.json();
@@ -161,16 +347,30 @@ async function apiGetTenant(slug) {
     return { __error: true };
   }
 }
-async function apiSetTenant(slug, obj, writeKey) {
+async function apiSetTenant(slug, obj, auth = {}) {
+  // Devuelve { ok, rev, data?, status }. "data" llega cuando el servidor tuvo
+  // que mezclar reservas de clientas que entraron mientras el equipo editaba.
   try {
+    const headers = { "Content-Type": "application/json" };
+    if (auth.token) headers["x-team-token"] = auth.token;
+    if (auth.adminKey) headers["x-admin-key"] = auth.adminKey;
     const res = await fetch(`/api/tenant/${encodeURIComponent(slug)}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...(writeKey ? { "x-write-key": writeKey } : {}) },
-      body: JSON.stringify(obj),
+      method: "POST", headers, body: JSON.stringify({ ...obj, _baseRev: obj._rev || 0 }),
     });
-    return res.ok;
+    const json = await res.json().catch(() => ({}));
+    return { ok: res.ok, status: res.status, ...json };
   } catch {
-    return false;
+    return { ok: false, status: 0 };
+  }
+}
+async function apiPost(path, body) {
+  // Para el ingreso del equipo y las acciones de las clientas.
+  try {
+    const res = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
+    const json = await res.json().catch(() => ({}));
+    return { ok: res.ok, status: res.status, ...json };
+  } catch {
+    return { ok: false, status: 0, error: "No se pudo conectar con el servidor. Revisa tu internet." };
   }
 }
 async function apiDeleteTenant(slug, adminKey) {
@@ -863,133 +1063,60 @@ function LoginSplit({ eyebrow, title, quote, onBack, children }) {
   );
 }
 
-function ClientAuthFields({ data, persist, onAuth }) {
-  const [tab, setTab] = useState("ingresar");
+function ClientAuthFields({ onAuth }) {
+  // Acceso rápido: sin correo ni PIN. La clienta se identifica por su celular;
+  // si ya había reservado antes con ese número, se le muestran sus citas.
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
-  const [email, setEmail] = useState("");
-  const [pin, setPin] = useState("");
   const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
 
-  const [recoverPhone, setRecoverPhone] = useState("");
-  const [newPin, setNewPin] = useState("");
-  const [recoverError, setRecoverError] = useState("");
-  const [recoverOk, setRecoverOk] = useState(false);
-
-  function register() {
-    if (!name.trim() || !email.trim() || pin.length !== 4) {
-      setError("Completa nombre, correo y un PIN de 4 dígitos.");
-      return;
+  async function entrar(e) {
+    e?.preventDefault?.();
+    setError("");
+    const digits = normPhone(phone);
+    if (!name.trim()) { setError("Escribe tu nombre."); return; }
+    if (digits.length < 7 || digits.length > 13) { setError("Escribe un número de celular válido (ej. 300 123 4567)."); return; }
+    setBusy(true);
+    try {
+      const err = await onAuth({ name: name.trim(), phone: digits });
+      if (err) setError(err);
+    } finally {
+      setBusy(false);
     }
-    if (data.clients.some((c) => c.email.toLowerCase() === email.trim().toLowerCase())) {
-      setError("Ya existe una cuenta con ese correo. Intenta ingresar.");
-      return;
-    }
-    const client = { id: uid(), name: name.trim(), phone: phone.trim(), email: email.trim().toLowerCase(), pin };
-    onAuth(client, true);
-  }
-  function login() {
-    const found = data.clients.find((c) => c.email.toLowerCase() === email.trim().toLowerCase() && c.pin === pin);
-    if (!found) { setError("Correo o PIN incorrectos."); return; }
-    onAuth(found, false);
-  }
-  async function recoverPin() {
-    setRecoverError(""); setRecoverOk(false);
-    if (!email.trim() || !recoverPhone.trim() || newPin.length !== 4) {
-      setRecoverError("Completa tu correo, tu teléfono registrado y un nuevo PIN de 4 dígitos.");
-      return;
-    }
-    const found = data.clients.find(
-      (c) => c.email.toLowerCase() === email.trim().toLowerCase() && (c.phone || "").replace(/\D/g, "") === recoverPhone.replace(/\D/g, "")
-    );
-    if (!found) {
-      setRecoverError("No encontramos una cuenta con ese correo y ese teléfono juntos.");
-      return;
-    }
-    const updated = { ...found, pin: newPin };
-    const ok = await persist({ ...data, clients: data.clients.map((c) => (c.id === found.id ? updated : c)) });
-    if (ok === false) {
-      setRecoverError("No se pudo cambiar el PIN: problema de conexión con el servidor. Intenta de nuevo.");
-      return;
-    }
-    setRecoverOk(true);
-    setPin(""); setRecoverPhone(""); setNewPin("");
   }
 
   return (
-    <>
-      <h3 className="form-title">
-        {tab === "ingresar" ? "Inicia sesión" : tab === "registro" ? "Crea tu cuenta" : "Recupera tu PIN"}
-      </h3>
-      <p className="form-sub">Reserva y gestiona tus citas de uñas y keratina en un solo lugar.</p>
-      <div className="tab-row">
-        <button className={`tab-btn ${tab === "ingresar" ? "tab-btn-active" : ""}`} onClick={() => setTab("ingresar")}>Ingresar</button>
-        <button className={`tab-btn ${tab === "registro" ? "tab-btn-active" : ""}`} onClick={() => setTab("registro")}>Crear cuenta</button>
+    <form onSubmit={entrar}>
+      <h3 className="form-title">Reserva tu cita</h3>
+      <p className="form-sub">Sin registrarte: solo tu nombre y tu celular. Con ese mismo número podrás ver o cancelar tus citas después.</p>
+      <div className="form-grid-1">
+        <input className="input" placeholder="Tu nombre" autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} />
+        <input className="input" placeholder="Celular (WhatsApp)" type="tel" inputMode="tel" autoComplete="tel" value={phone} onChange={(e) => setPhone(e.target.value)} />
+        {error && <p className="error-text">{error}</p>}
+        <button className="btn-primary" type="submit" disabled={busy}>{busy ? "Un momento…" : "Continuar"}</button>
       </div>
-      {tab === "registro" && (
-        <div className="form-grid-1">
-          <input className="input" placeholder="Nombre completo" value={name} onChange={(e) => setName(e.target.value)} />
-          <input className="input" placeholder="Teléfono" value={phone} onChange={(e) => setPhone(e.target.value)} />
-          <input className="input" placeholder="Correo" value={email} onChange={(e) => setEmail(e.target.value)} />
-          <input className="input" placeholder="Crea un PIN de 4 dígitos" maxLength={4} value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} />
-          {error && <p className="error-text">{error}</p>}
-          <button className="btn-primary" onClick={register}>Crear cuenta y entrar</button>
-        </div>
-      )}
-      {tab === "ingresar" && (
-        <div className="form-grid-1">
-          <input className="input" placeholder="Correo" value={email} onChange={(e) => setEmail(e.target.value)} />
-          <input className="input" placeholder="PIN de 4 dígitos" maxLength={4} value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} />
-          {error && <p className="error-text">{error}</p>}
-          <button className="btn-primary" onClick={login}>Entrar</button>
-          <button className="back-link" type="button" style={{ marginTop: ".2rem" }} onClick={() => { setRecoverError(""); setRecoverOk(false); setTab("recuperar"); }}>
-            ¿Olvidaste tu PIN?
-          </button>
-        </div>
-      )}
-      {tab === "recuperar" && (
-        <div className="form-grid-1">
-          {recoverOk ? (
-            <>
-              <p className="muted">Tu PIN se actualizó correctamente. Ya puedes ingresar con tu nuevo PIN.</p>
-              <button className="btn-primary" onClick={() => setTab("ingresar")}>Ir a ingresar</button>
-            </>
-          ) : (
-            <>
-              <p className="field-hint">Para confirmar que eres tú, escribe el correo y el teléfono con los que te registraste.</p>
-              <input className="input" placeholder="Correo con el que te registraste" value={email} onChange={(e) => setEmail(e.target.value)} />
-              <input className="input" placeholder="Teléfono con el que te registraste" value={recoverPhone} onChange={(e) => setRecoverPhone(e.target.value)} />
-              <input className="input" placeholder="Nuevo PIN de 4 dígitos" maxLength={4} value={newPin} onChange={(e) => setNewPin(e.target.value.replace(/\D/g, ""))} />
-              {recoverError && <p className="error-text">{recoverError}</p>}
-              <button className="btn-primary" onClick={recoverPin}>Cambiar mi PIN</button>
-            </>
-          )}
-        </div>
-      )}
-    </>
+    </form>
   );
 }
 
-function TeamAuthFields({ data, onAuth }) {
-  const hasTeam = data.employees.length > 0;
+function TeamAuthFields({ data, onLogin, onSetup }) {
+  const hasTeam = data.hasTeam != null ? data.hasTeam : data.employees.length > 0;
   const [name, setName] = useState("");
   const [pin, setPin] = useState("");
   const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
 
-  function setupAdmin() {
+  async function run(fn) {
+    setError("");
     if (!name.trim() || pin.length !== 4) { setError("Escribe tu nombre y un PIN de 4 dígitos."); return; }
-    const admin = {
-      id: uid(), name: name.trim(), pin, isAdmin: true, active: true,
-      serviceIds: data.services.map((s) => s.id),
-    };
-    onAuth(admin, true);
-  }
-  function login() {
-    const found = data.employees.find(
-      (e) => e.active && e.name.toLowerCase() === name.trim().toLowerCase() && e.pin === pin
-    );
-    if (!found) { setError("Nombre o PIN incorrectos."); return; }
-    onAuth(found, false);
+    setBusy(true);
+    try {
+      const err = await fn(name.trim(), pin);
+      if (err) setError(err);
+    } finally {
+      setBusy(false);
+    }
   }
 
   if (!hasTeam) {
@@ -999,39 +1126,39 @@ function TeamAuthFields({ data, onAuth }) {
         <p className="form-sub">Eres la primera persona en entrar: esta cuenta va a tener permisos sobre todo el negocio.</p>
         <div className="form-grid-1">
           <input className="input" placeholder="Tu nombre" value={name} onChange={(e) => setName(e.target.value)} />
-          <input className="input" placeholder="Crea un PIN de 4 dígitos" maxLength={4} value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} />
+          <input className="input" placeholder="Crea un PIN de 4 dígitos" maxLength={4} inputMode="numeric" value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} />
           {error && <p className="error-text">{error}</p>}
-          <button className="btn-primary" onClick={setupAdmin}>Crear cuenta y entrar</button>
+          <button className="btn-primary" disabled={busy} onClick={() => run(onSetup)}>{busy ? "Un momento…" : "Crear cuenta y entrar"}</button>
         </div>
       </>
     );
   }
   return (
-    <>
+    <form onSubmit={(e) => { e.preventDefault(); run(onLogin); }}>
       <h3 className="form-title">Ingreso del equipo</h3>
       <p className="form-sub">Gestiona tu agenda y tus clientas desde un solo lugar.</p>
       <div className="form-grid-1">
         <input className="input" placeholder="Tu nombre" value={name} onChange={(e) => setName(e.target.value)} />
-        <input className="input" placeholder="PIN de 4 dígitos" maxLength={4} value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} />
+        <input className="input" placeholder="PIN de 4 dígitos" maxLength={4} inputMode="numeric" type="password" value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} />
         {error && <p className="error-text">{error}</p>}
-        <button className="btn-primary" onClick={login}>Entrar</button>
+        <button className="btn-primary" type="submit" disabled={busy}>{busy ? "Verificando…" : "Entrar"}</button>
       </div>
-    </>
+    </form>
   );
 }
 
-function AuthScreen({ data, persist, businessName, onClientAuth, onTeamAuth, onLeaveCompany }) {
+function AuthScreen({ data, businessName, onClientAuth, onTeamLogin, onTeamSetup, onLeaveCompany }) {
   const [mode, setMode] = useState("elegir");
 
   if (mode === "cliente") {
     return (
       <LoginSplit
-        eyebrow="Bienvenida de nuevo"
+        eyebrow="Reserva en 1 minuto"
         title={<>Tu cita.<br />Tu momento.<br />Tu mejor versión.</>}
         quote="Cada cita es una oportunidad para que alguien se sienta espectacular."
         onBack={() => setMode("elegir")}
       >
-        <ClientAuthFields data={data} persist={persist} onAuth={onClientAuth} />
+        <ClientAuthFields onAuth={onClientAuth} />
       </LoginSplit>
     );
   }
@@ -1043,7 +1170,7 @@ function AuthScreen({ data, persist, businessName, onClientAuth, onTeamAuth, onL
         quote="Cada cita es una oportunidad para que alguien se sienta espectacular."
         onBack={() => setMode("elegir")}
       >
-        <TeamAuthFields data={data} onAuth={onTeamAuth} />
+        <TeamAuthFields data={data} onLogin={onTeamLogin} onSetup={onTeamSetup} />
       </LoginSplit>
     );
   }
@@ -1063,7 +1190,7 @@ function AuthScreen({ data, persist, businessName, onClientAuth, onTeamAuth, onL
             <User size={20} />
             <div>
               <div className="choice-title">Soy cliente o clienta</div>
-              <div className="choice-sub">Reservar una cita o ver las mías</div>
+              <div className="choice-sub">Reserva con tu nombre y celular, sin registrarte</div>
             </div>
           </button>
           <button className="choice-card" onClick={() => setMode("equipo")}>
@@ -1091,7 +1218,7 @@ function AuthScreen({ data, persist, businessName, onClientAuth, onTeamAuth, onL
 
 /* ---------------------------------- Vista clienta: reservar ---------------------------------- */
 
-function BookingWizard({ data, persist, clientId, onBooked, promo, onClearPromo }) {
+function BookingWizard({ data, persist, clientId, client, createAppointment, onBooked, promo, onClearPromo }) {
   const [step, setStep] = useState(1);
   const [serviceId, setServiceId] = useState(null);
   const [employeeId, setEmployeeId] = useState("");
@@ -1101,6 +1228,8 @@ function BookingWizard({ data, persist, clientId, onBooked, promo, onClearPromo 
   const [slot, setSlot] = useState(null);
   const [done, setDone] = useState(false);
   const [appliedPromoId, setAppliedPromoId] = useState(null);
+  const [savedAppt, setSavedAppt] = useState(null);
+  const [saving, setSaving] = useState(false);
 
   const promoServiceIdList = promo ? promoServiceIds(promo) : [];
 
@@ -1146,6 +1275,7 @@ function BookingWizard({ data, persist, clientId, onBooked, promo, onClearPromo 
     const out = [];
     for (let m = OPEN_START_MIN; m + service.duration <= OPEN_END_MIN; m += SLOT_STEP_MIN) {
       if (isExtendedSlot(m) && !extendedOn) continue;
+      if (isPastSlot(dateISO, m)) continue;
       const cands = candidatesFor(employeeId).filter((e) => employeeWorksOn(e, dateISO) && isFree(e.id, dateISO, m, service.duration));
       if (cands.length > 0) out.push({ time: minToTime(m), employeeId: cands[0].id, employeeName: cands[0].name });
     }
@@ -1165,16 +1295,38 @@ function BookingWizard({ data, persist, clientId, onBooked, promo, onClearPromo 
       date, time: slot.time, status: pending ? "pendiente" : "confirmada", createdAt: Date.now(),
       promoId: promoApplies ? promo.id : null, promoTitle: promoApplies ? promo.title : null,
     };
-    const ok = await persist({ ...data, appointments: [...data.appointments, appt] });
-    if (ok === false) {
-      window.alert("No se pudo agendar la cita: hubo un problema de conexión con el servidor. Intenta de nuevo.");
-      return;
+    setSaving(true);
+    try {
+      if (createAppointment) {
+        const res = await createAppointment(appt);
+        if (!res.ok) {
+          if (res.error === "ocupado") {
+            window.alert("¡Uy! Alguien acaba de tomar ese horario. Elige otra hora, por favor.");
+            setSlot(null);
+          } else {
+            window.alert(res.error || "No se pudo agendar la cita: hubo un problema de conexión con el servidor. Intenta de nuevo.");
+          }
+          return;
+        }
+        setSavedAppt(res.appt);
+        setDone(true);
+        return;
+      } else {
+        const ok = await persist({ ...data, appointments: [...data.appointments, appt] });
+        if (ok === false) {
+          window.alert("No se pudo agendar la cita: hubo un problema de conexión con el servidor. Intenta de nuevo.");
+          return;
+        }
+      }
+      setSavedAppt(appt);
+      setDone(true);
+    } finally {
+      setSaving(false);
     }
-    setDone(true);
   }
 
   function restart() {
-    setStep(1); setServiceId(null); setEmployeeId(""); setDate(null); setSlot(null); setDone(false);
+    setStep(1); setServiceId(null); setEmployeeId(""); setDate(null); setSlot(null); setDone(false); setSavedAppt(null);
     clearPromo();
   }
 
@@ -1189,7 +1341,13 @@ function BookingWizard({ data, persist, clientId, onBooked, promo, onClearPromo 
             ? `Tu cita de ${service?.name} para el ${date} a las ${slot?.time} es en horario especial, así que queda pendiente de aprobación. Te avisaremos cuando la administradora la confirme — la puedes ver desde "Mis citas".`
             : `Tu cita de ${service?.name} quedó agendada para el ${date} a las ${slot?.time}. La puedes ver o cancelar desde "Mis citas".`}
         </p>
-        <button className="btn-primary" onClick={() => { restart(); onBooked(); }}>Ver mis citas</button>
+        {savedAppt && (
+          <>
+            <p className="field-hint" style={{ marginTop: ".4rem" }}>Código de tu cita: <strong>{apptCode(savedAppt)}</strong>. Envía el comprobante al salón por WhatsApp o guárdalo como imagen.</p>
+            <ComprobanteActions data={data} appt={savedAppt} client={client} />
+          </>
+        )}
+        <button className="btn-ghost" style={{ marginTop: ".8rem" }} onClick={() => { restart(); onBooked(); }}>Ver mis citas</button>
       </div>
     );
   }
@@ -1308,7 +1466,7 @@ function BookingWizard({ data, persist, clientId, onBooked, promo, onClearPromo 
           )}
           <div className="row-gap">
             <button className="btn-ghost" onClick={() => setSlot(null)}>Elegir otra hora</button>
-            <button className="btn-primary" onClick={confirmBooking}>Confirmar reserva</button>
+            <button className="btn-primary" disabled={saving} onClick={confirmBooking}>{saving ? "Guardando…" : "Confirmar reserva"}</button>
           </div>
         </div>
       )}
@@ -1316,7 +1474,7 @@ function BookingWizard({ data, persist, clientId, onBooked, promo, onClearPromo 
   );
 }
 
-function MyAppointments({ data, persist, clientId }) {
+function MyAppointments({ data, persist, clientId, client, actions }) {
   const mine = data.appointments
     .filter((a) => a.clientId === clientId)
     .sort((a, b) => (a.date + a.time < b.date + b.time ? -1 : 1));
@@ -1347,6 +1505,16 @@ function MyAppointments({ data, persist, clientId }) {
       );
       return;
     }
+    if (!window.confirm(`¿Cancelar tu cita de ${a.serviceName} del ${a.date} a las ${a.time}?`)) return;
+    if (actions) {
+      const res = await actions.cancel(a);
+      if (!res.ok) {
+        window.alert(res.error === "muy-tarde"
+          ? `Esta cita es en menos de ${cancelMinHours} horas, así que ya no se puede cancelar desde aquí.` + (contactPhone ? ` Escríbenos al ${contactPhone}.` : "")
+          : res.error || "No se pudo cancelar: problema de conexión. Intenta de nuevo.");
+      }
+      return;
+    }
     await persist({ ...data, appointments: data.appointments.map((x) => (x.id === a.id ? { ...x, status: "cancelada" } : x)) });
   }
   function employeeName(id) { return data.employees.find((e) => e.id === id)?.name || "—"; }
@@ -1369,6 +1537,8 @@ function MyAppointments({ data, persist, clientId }) {
     const duration = serviceDuration(a);
     const out = [];
     for (let m = OPEN_START_MIN; m + duration <= OPEN_END_MIN; m += SLOT_STEP_MIN) {
+      if (isPastSlot(dateISO, m)) continue;
+      if (isExtendedSlot(m) && data.extendedHoursEnabled === false) continue;
       if (isFreeExcluding(a.employeeId, dateISO, m, duration, a.id)) out.push(minToTime(m));
     }
     return out;
@@ -1382,6 +1552,15 @@ function MyAppointments({ data, persist, clientId }) {
   }
 
   async function confirmarReagendo(a, time) {
+    if (actions) {
+      const res = await actions.reschedule(a, reDate, time);
+      if (!res.ok) {
+        window.alert(res.error === "ocupado" ? "Ese horario se acaba de ocupar. Elige otro, por favor." : res.error || "No se pudo reagendar: problema de conexión. Intenta de nuevo.");
+        return;
+      }
+      setReagendarId(null); setReDate(null);
+      return;
+    }
     const ok = await persist({ ...data, appointments: data.appointments.map((x) => (x.id === a.id ? { ...x, date: reDate, time } : x)) });
     if (ok === false) {
       window.alert("No se pudo reagendar la cita: problema de conexión con el servidor. Intenta de nuevo.");
@@ -1401,6 +1580,12 @@ function MyAppointments({ data, persist, clientId }) {
   }
   async function enviarResena(a) {
     const review = { rating: reviewRating, comment: reviewComment.trim(), createdAt: Date.now() };
+    if (actions) {
+      const res = await actions.review(a, review);
+      if (!res.ok) { window.alert(res.error || "No se pudo enviar la reseña. Intenta de nuevo."); return; }
+      setReviewingId(null);
+      return;
+    }
     const ok = await persist({ ...data, appointments: data.appointments.map((x) => (x.id === a.id ? { ...x, review } : x)) });
     if (ok === false) {
       window.alert("No se pudo enviar la reseña: problema de conexión con el servidor. Intenta de nuevo.");
@@ -1419,7 +1604,7 @@ function MyAppointments({ data, persist, clientId }) {
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: ".75rem", width: "100%" }}>
               <div>
                 <div className="appt-service">{a.serviceName}</div>
-                <div className="appt-meta">{a.date} · {a.time} · con {employeeName(a.employeeId)}</div>
+                <div className="appt-meta">{a.date} · {a.time} · con {employeeName(a.employeeId)} · código {apptCode(a)}</div>
                 {a.status === "pendiente" && (
                   <div className="appt-meta">Horario especial: queda pendiente de aprobación de la administradora.</div>
                 )}
@@ -1431,6 +1616,9 @@ function MyAppointments({ data, persist, clientId }) {
                 </button>
                 <button className="btn-ghost-danger" onClick={() => cancel(a)}>Cancelar</button>
               </div>
+            </div>
+            <div style={{ marginTop: ".6rem" }}>
+              <ComprobanteActions data={data} appt={a} client={client} compact />
             </div>
             {reagendarId === a.id && (
               <div style={{ width: "100%", marginTop: ".9rem", paddingTop: ".9rem", borderTop: "1px solid var(--line)" }}>
@@ -1580,11 +1768,19 @@ function ClientPromotions({ data, promotions, onUsePromo }) {
   );
 }
 
-function ClientApp({ data, persist, session, onLogout }) {
+function ClientApp({ data, persist, session, onLogout, createAppointment, clientActions }) {
   const [tab, setTab] = useState("reservar");
   const [activePromo, setActivePromo] = useState(null);
   const [bookingKey, setBookingKey] = useState(0);
   const client = data.clients.find((c) => c.id === session.id);
+  if (!client) {
+    return (
+      <div className="login"><div className="panel empty-state">
+        <p>No encontramos tus datos. Vuelve a ingresar con tu nombre y celular.</p>
+        <button className="btn-primary" onClick={onLogout}>Volver</button>
+      </div></div>
+    );
+  }
   const activePromoCount = (data.promotions || []).filter(isPromoVisible).length;
   return (
     <Shell
@@ -1602,11 +1798,11 @@ function ClientApp({ data, persist, session, onLogout }) {
       {tab === "promociones" && <ClientPromotions data={data} promotions={data.promotions} onUsePromo={(p) => { setActivePromo(p); setTab("reservar"); setBookingKey((k) => k + 1); }} />}
       {tab === "reservar" && (
         <>
-          <ClientPromotions data={data} promotions={data.promotions} onUsePromo={(p) => { setActivePromo(p); setBookingKey((k) => k + 1); }} />
-          <BookingWizard key={bookingKey} data={data} persist={persist} clientId={client.id} promo={activePromo} onClearPromo={() => setActivePromo(null)} onBooked={() => { setActivePromo(null); setTab("mis-citas"); }} />
+          {activePromoCount > 0 && <ClientPromotions data={data} promotions={data.promotions} onUsePromo={(p) => { setActivePromo(p); setBookingKey((k) => k + 1); }} />}
+          <BookingWizard key={bookingKey} data={data} persist={persist} clientId={client.id} client={client} createAppointment={createAppointment} promo={activePromo} onClearPromo={() => setActivePromo(null)} onBooked={() => { setActivePromo(null); setTab("mis-citas"); }} />
         </>
       )}
-      {tab === "mis-citas" && <MyAppointments data={data} persist={persist} clientId={client.id} />}
+      {tab === "mis-citas" && <MyAppointments data={data} persist={persist} clientId={client.id} client={client} actions={clientActions} />}
     </Shell>
   );
 }
@@ -1640,7 +1836,7 @@ function AgendaView({ data, persist, employeeId, onlyMine, isAdmin }) {
     const phone = clientPhone(a.clientId).replace(/\D/g, "");
     if (!phone) { window.alert("Esta clienta no tiene teléfono registrado."); return; }
     const msg = `Hola ${clientName(a.clientId)}, te recordamos tu cita de ${serviceName(a.serviceId)} el ${a.date} a las ${a.time} en ${data.businessName}. ¡Te esperamos!`;
-    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, "_blank");
+    window.open(`https://wa.me/${waPhone(phone)}?text=${encodeURIComponent(msg)}`, "_blank");
   }
 
   function isFreeFor(empId, dateISO, startMin, duration, excludeApptId) {
@@ -1950,7 +2146,7 @@ function TeamManager({ data, persist }) {
     setEditingId(e.id);
     setEditName(e.name);
     setEditPhone(e.phone || "");
-    setEditPin(e.pin || "");
+    setEditPin("");
     setEditServiceIds(e.serviceIds || []);
     setEditWorkDays(Array.isArray(e.workDays) && e.workDays.length > 0 ? e.workDays : [0, 1, 2, 3, 4, 5, 6]);
     setEditError("");
@@ -1966,7 +2162,8 @@ function TeamManager({ data, persist }) {
     setEditWorkDays((prev) => (prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d].sort()));
   }
   async function saveEdit(target) {
-    if (!editName.trim() || editPin.length !== 4) { setEditError("Escribe el nombre y un PIN de 4 dígitos."); return; }
+    if (!editName.trim()) { setEditError("Escribe el nombre."); return; }
+    if (editPin.length !== 0 && editPin.length !== 4) { setEditError("El PIN nuevo debe tener 4 dígitos (o déjalo vacío para no cambiarlo)."); return; }
     if (data.employees.some((e) => e.id !== target.id && e.name.toLowerCase() === editName.trim().toLowerCase())) {
       setEditError("Ya existe alguien con ese nombre.");
       return;
@@ -2016,7 +2213,7 @@ function TeamManager({ data, persist }) {
                 <div className="form-grid">
                   <input className="input" placeholder="Nombre" value={editName} onChange={(ev) => setEditName(ev.target.value)} />
                   <input className="input" placeholder="Teléfono (para WhatsApp)" value={editPhone} onChange={(ev) => setEditPhone(ev.target.value)} />
-                  <input className="input" placeholder="PIN de 4 dígitos" maxLength={4} value={editPin} onChange={(ev) => setEditPin(ev.target.value.replace(/\D/g, ""))} />
+                  <input className="input" placeholder="PIN nuevo (vacío = no cambiar)" maxLength={4} value={editPin} onChange={(ev) => setEditPin(ev.target.value.replace(/\D/g, ""))} />
                 </div>
                 <p className="field-hint">Servicios que realiza:</p>
                 <div className="chip-row">
@@ -2115,6 +2312,12 @@ function ServicesManager({ data, persist }) {
     if (isNaN(n) || n < 0) return;
     await persist({ ...data, pointsPerThousand: n });
   }
+  const [waSalon, setWaSalon] = useState(data.whatsappSalon || "");
+  const [waSaved, setWaSaved] = useState(false);
+  async function saveWaSalon() {
+    const ok = await persist({ ...data, whatsappSalon: normPhone(waSalon) });
+    setWaSaved(ok !== false);
+  }
   const extendedOn = data.extendedHoursEnabled !== false;
   async function toggleExtendedHours() {
     await persist({ ...data, extendedHoursEnabled: !extendedOn });
@@ -2159,6 +2362,15 @@ function ServicesManager({ data, persist }) {
 
   return (
     <>
+      <div className="panel" style={{ marginBottom: "1.5rem" }}>
+        <h3 className="section-title">WhatsApp del salón</h3>
+        <p className="field-hint">A este número le llegan los comprobantes que envían las clientas al reservar. Si lo dejas vacío se usa el teléfono de la administradora.</p>
+        <div style={{ display: "flex", gap: ".6rem", alignItems: "center", flexWrap: "wrap" }}>
+          <input className="input" type="tel" placeholder="Ej. 300 123 4567" style={{ maxWidth: 220 }} value={waSalon} onChange={(e) => { setWaSalon(e.target.value); setWaSaved(false); }} />
+          <button className="btn-ghost" onClick={saveWaSalon}>Guardar</button>
+          {waSaved && <span className="muted">Guardado ✓</span>}
+        </div>
+      </div>
       <div className="panel" style={{ marginBottom: "1.5rem" }}>
         <h3 className="section-title">Reglas de cancelación</h3>
         <p className="field-hint">Las clientas no podrán cancelar una cita desde la app si faltan menos de estas horas.</p>
@@ -2685,7 +2897,7 @@ function VentasManager({ data, persist, businessName }) {
     const phone = (venta.clientPhone || "").replace(/\D/g, "");
     if (!phone) { window.alert("Esta clienta no tiene teléfono registrado."); return; }
     const msg = `Hola ${venta.clientName}, aquí tienes tu comprobante de ${businessName}:\n\nN.° ${venta.consecutivo}\nServicio: ${venta.serviceName}\nValor: ${money(venta.price)}\nFecha: ${venta.date}\n\n¡Gracias por tu visita!`;
-    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, "_blank");
+    window.open(`https://wa.me/${waPhone(phone)}?text=${encodeURIComponent(msg)}`, "_blank");
   }
 
   return (
@@ -3180,7 +3392,7 @@ function ComisionesManager({ data, persist, businessName }) {
     const phone = (empleado.phone || "").replace(/\D/g, "");
     if (!phone) { window.alert("Esta trabajadora no tiene teléfono registrado. Agrégalo en la pestaña Equipo."); return; }
     const msg = `Hola ${empleado.name}, aquí está tu liquidación de ${businessName} del ${start} al ${end}:\n\nDías trabajados: ${diasTrabajados}\nTotal generado: ${money(totalGenerado)}\nComisión (${diasTrabajados} × ${money(tarifa)}): ${money(comision)}\n\nNeto a pagar: ${money(neto)}\n\n¡Gracias por tu trabajo!`;
-    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, "_blank");
+    window.open(`https://wa.me/${waPhone(phone)}?text=${encodeURIComponent(msg)}`, "_blank");
   }
 
   const liquidacionesEmp = empleado
@@ -3626,7 +3838,7 @@ function PlatformAdmin({ registry, adminKey, persistRegistry, onEnterCompany, on
     const company = { id: uid(), slug: finalSlug, name: name.trim(), vigenciaInicio: inicio, vigenciaFin, createdAt: Date.now() };
     await persistRegistry({ ...registry, companies: [...(registry.companies || []), company] });
     const seed = { ...defaultData(), businessName: name.trim() };
-    await apiSetTenant(finalSlug, seed);
+    await apiSetTenant(finalSlug, seed, { adminKey });
     setName(""); setSlug(""); setVigenciaModo("6m"); setCustomFecha(""); setError("");
   }
 
@@ -3740,7 +3952,8 @@ export default function App() {
   const [platformSession, setPlatformSession] = useState(null);
   const [activeCompany, setActiveCompany] = useState(null);
   const [tenantData, setTenantData] = useState(null);
-  const [tenantWriteKey, setTenantWriteKey] = useState(null);
+  const [teamToken, setTeamToken] = useState(null);
+  const [clientCreds, setClientCreds] = useState(null); // { clientId, phone }
   const [companySession, setCompanySession] = useState(null);
   const [initialCode] = useState(() => {
     try {
@@ -3751,6 +3964,7 @@ export default function App() {
   });
 
   const navStateRef = useRef({ view, companySession, platformSession });
+  const logoutRef = useRef(null);
   useEffect(() => {
     navStateRef.current = { view, companySession, platformSession };
   });
@@ -3766,7 +3980,7 @@ export default function App() {
     function handlePopState() {
       const { view: v, companySession: cs } = navStateRef.current;
       if (v === "company" && cs) {
-        setCompanySession(null);
+        logoutRef.current?.();
       } else if (v === "company" && !cs) {
         leaveCompany();
       } else if (v === "platform-admin") {
@@ -3805,7 +4019,8 @@ export default function App() {
   async function enterCompany(company) {
     setActiveCompany(company);
     setCompanySession(null);
-    const res = await apiGetTenant(company.slug);
+    setTeamToken(null); setClientCreds(null);
+    let res = await apiGetTenant(company.slug);
     if (res && res.__error) {
       // No se pudo confirmar si la empresa tiene datos o no: nunca sembrar
       // encima ante la duda, solo avisar y no continuar.
@@ -3815,56 +4030,123 @@ export default function App() {
     }
     if (res && res.__notFound) {
       const seed = { ...defaultData(), businessName: company.name };
-      setTenantData(seed);
-      setTenantWriteKey(null);
-      await apiSetTenant(company.slug, seed, null);
-    } else if (res) {
-      const { _writeKey, ...rest } = res;
-      setTenantWriteKey(_writeKey || null);
-      setTenantData(rest);
+      await apiSetTenant(company.slug, seed, {});
+      res = await apiGetTenant(company.slug);
+      if (!res || res.__error || res.__notFound) {
+        window.alert("No se pudo preparar la empresa. Intenta de nuevo.");
+        setActiveCompany(null);
+        return;
+      }
     }
+    setTenantData(res);
     setView("company");
   }
 
+  // Guardado completo: solo lo usa el equipo (con su sesión).
   const persistTenant = useCallback(async (next) => {
     const previous = tenantData;
     setTenantData(next);
-    if (!activeCompany) return false;
-    const ok = await apiSetTenant(activeCompany.slug, next, tenantWriteKey);
-    if (!ok) setTenantData(previous);
-    return ok;
-  }, [activeCompany, tenantWriteKey, tenantData]);
+    if (!activeCompany || !teamToken) return false;
+    const res = await apiSetTenant(activeCompany.slug, next, { token: teamToken });
+    if (!res.ok) {
+      setTenantData(previous);
+      if (res.status === 401) {
+        window.alert("Tu sesión se cerró. Vuelve a ingresar con tu nombre y PIN.");
+        logoutRef.current?.();
+      } else if (res.error) {
+        window.alert(res.error);
+      }
+      return false;
+    }
+    // Si el servidor mezcló reservas nuevas de clientas, usamos su versión.
+    setTenantData(res.data ? res.data : { ...next, _rev: res.rev });
+    return true;
+  }, [activeCompany, teamToken, tenantData]);
+
+  // Vuelve a leer los datos (lo que corresponda según quién está adentro).
+  const refreshTenant = useCallback(async (auth) => {
+    if (!activeCompany) return null;
+    const res = await apiGetTenant(activeCompany.slug, auth);
+    if (res && !res.__error && !res.__notFound) { setTenantData(res); return res; }
+    return null;
+  }, [activeCompany]);
+
+  // Refresco automático para el equipo: las reservas nuevas aparecen solas
+  // en la agenda sin tener que recargar la página.
+  useEffect(() => {
+    if (!teamToken || companySession?.type !== "empleado" || !activeCompany) return undefined;
+    const t = setInterval(async () => {
+      const res = await apiGetTenant(activeCompany.slug, { token: teamToken });
+      if (res && !res.__error && !res.__notFound && !res._public) {
+        setTenantData((cur) => (cur && (res._rev || 0) > (cur._rev || 0) ? res : cur));
+      }
+    }, 30000);
+    return () => clearInterval(t);
+  }, [teamToken, companySession, activeCompany]);
 
   function leaveCompany() {
     setActiveCompany(null);
     setTenantData(null);
-    setTenantWriteKey(null);
+    setTeamToken(null);
+    setClientCreds(null);
     setCompanySession(null);
     setView("gate");
   }
 
-  async function handleClientAuth(client, isNew) {
-    if (isNew) {
-      const ok = await persistTenant({ ...tenantData, clients: [...tenantData.clients, client] });
-      if (!ok) {
-        setTenantData(tenantData);
-        window.alert("No se pudo crear tu cuenta: hubo un problema de conexión con el servidor. Intenta de nuevo.");
-        return;
-      }
-    }
-    setCompanySession({ type: "cliente", id: client.id });
+  // Salir de la sesión (clienta o equipo): se borran las credenciales y se
+  // vuelven a cargar solo los datos públicos, para que nada privado quede en pantalla.
+  async function logoutCompany() {
+    setCompanySession(null);
+    setTeamToken(null);
+    setClientCreds(null);
+    await refreshTenant({});
   }
-  async function handleTeamAuth(emp, isNew) {
-    if (isNew) {
-      const ok = await persistTenant({ ...tenantData, employees: [...tenantData.employees, emp] });
-      if (!ok) {
-        setTenantData(tenantData);
-        window.alert("No se pudo crear tu cuenta: hubo un problema de conexión con el servidor. Intenta de nuevo.");
-        return;
-      }
-    }
-    setCompanySession({ type: "empleado", id: emp.id });
+  logoutRef.current = logoutCompany;
+
+  async function handleClientAuth({ name, phone }) {
+    if (!activeCompany) return "Vuelve a escribir el código de la empresa.";
+    const res = await apiPost(`/api/tenant/${encodeURIComponent(activeCompany.slug)}/public/client`, { name, phone });
+    if (!res.ok || !res.client) return res.error || "No se pudo continuar. Intenta de nuevo.";
+    const creds = { clientId: res.client.id, phone: res.client.phone };
+    const fresh = await refreshTenant(creds);
+    if (!fresh) return "No se pudo conectar con el servidor. Intenta de nuevo.";
+    setClientCreds(creds);
+    setCompanySession({ type: "cliente", id: res.client.id });
+    return null;
   }
+
+  async function finishTeamAuth(res) {
+    if (!res.ok || !res.token) return res.error || "No se pudo ingresar. Intenta de nuevo.";
+    const fresh = await refreshTenant({ token: res.token });
+    if (!fresh) return "No se pudo conectar con el servidor. Intenta de nuevo.";
+    setTeamToken(res.token);
+    setCompanySession({ type: "empleado", id: res.employee.id });
+    return null;
+  }
+  async function handleTeamLogin(name, pin) {
+    return finishTeamAuth(await apiPost(`/api/tenant/${encodeURIComponent(activeCompany.slug)}/team/login`, { name, pin }));
+  }
+  async function handleTeamSetup(name, pin) {
+    return finishTeamAuth(await apiPost(`/api/tenant/${encodeURIComponent(activeCompany.slug)}/team/setup`, { name, pin }));
+  }
+
+  // Acciones de la clienta: van por rutas públicas del servidor, que verifica
+  // que la cita sea de ella y que el horario siga libre.
+  async function clientCall(path, body) {
+    if (!activeCompany || !clientCreds) return { ok: false, error: "Vuelve a ingresar con tu nombre y celular." };
+    const res = await apiPost(`/api/tenant/${encodeURIComponent(activeCompany.slug)}/public/${path}`, { ...clientCreds, phone: clientCreds.phone, ...body });
+    if (res.ok) await refreshTenant(clientCreds);
+    return res;
+  }
+  const createAppointment = (appt) => clientCall("appointments", {
+    serviceId: appt.serviceId, employeeId: appt.employeeId, date: appt.date, time: appt.time, promoId: appt.promoId,
+  });
+  const clientActions = {
+    cancel: (a) => clientCall(`appointments/${encodeURIComponent(a.id)}/cancel`, {}),
+    reschedule: (a, date, time) => clientCall(`appointments/${encodeURIComponent(a.id)}/reschedule`, { date, time }),
+    review: (a, review) => clientCall(`appointments/${encodeURIComponent(a.id)}/review`, { rating: review.rating, comment: review.comment }),
+  };
+
   function handlePlatformAuth(key) {
     setPlatformSession(key);
     setView("platform-admin");
@@ -3911,18 +4193,18 @@ export default function App() {
       {view === "company" && tenantData && !companySession && (
         <AuthScreen
           data={tenantData}
-          persist={persistTenant}
           businessName={tenantData.businessName}
           onClientAuth={handleClientAuth}
-          onTeamAuth={handleTeamAuth}
+          onTeamLogin={handleTeamLogin}
+          onTeamSetup={handleTeamSetup}
           onLeaveCompany={leaveCompany}
         />
       )}
       {view === "company" && tenantData && companySession?.type === "cliente" && (
-        <ClientApp data={tenantData} persist={persistTenant} session={companySession} onLogout={() => setCompanySession(null)} />
+        <ClientApp data={tenantData} persist={async () => false} createAppointment={createAppointment} clientActions={clientActions} session={companySession} onLogout={logoutCompany} />
       )}
-      {view === "company" && tenantData && companySession?.type === "empleado" && (
-        <TeamApp data={tenantData} persist={persistTenant} session={companySession} onLogout={() => setCompanySession(null)} />
+      {view === "company" && tenantData && !tenantData._public && companySession?.type === "empleado" && (
+        <TeamApp data={tenantData} persist={persistTenant} session={companySession} onLogout={logoutCompany} />
       )}
     </div>
   );
