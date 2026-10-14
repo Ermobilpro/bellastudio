@@ -1131,7 +1131,7 @@ function LoginSplit({ eyebrow, title, quote, onBack, children }) {
         <div className="login-form">
           <div className="brand-label">{eyebrow}</div>
           {children}
-          <button className="back-link" type="button" onClick={onBack}>&larr; Volver a bienvenida</button>
+          {onBack && <button className="back-link" type="button" onClick={onBack}>&larr; Volver</button>}
         </div>
       </div>
     </div>
@@ -1222,72 +1222,30 @@ function TeamAuthFields({ data, onLogin, onSetup }) {
   );
 }
 
-function AuthScreen({ data, businessName, onClientAuth, onTeamLogin, onTeamSetup, onLeaveCompany }) {
-  const [mode, setMode] = useState("elegir");
-
-  if (mode === "cliente") {
-    return (
-      <LoginSplit
-        eyebrow="Reserva en 1 minuto"
-        title={<>Tu cita.<br />Tu momento.<br />Tu mejor versión.</>}
-        quote="Cada cita es una oportunidad para que alguien se sienta espectacular."
-        onBack={() => setMode("elegir")}
-      >
-        <ClientAuthFields onAuth={onClientAuth} />
-      </LoginSplit>
-    );
-  }
+function AuthScreen({ data, businessName, mode, onClientAuth, onTeamLogin, onTeamSetup, onLeaveCompany }) {
+  // mode = "cliente": lo que abre el link que se comparte con las clientas.
+  // mode = "equipo": solo con el link del equipo (/equipo?empresa=...).
   if (mode === "equipo") {
     return (
       <LoginSplit
-        eyebrow="Panel del equipo"
+        eyebrow={`${businessName} · Equipo`}
         title={<>Tu cabina.<br />Tu ritmo.<br />Tu éxito.</>}
         quote="Cada cita es una oportunidad para que alguien se sienta espectacular."
-        onBack={() => setMode("elegir")}
+        onBack={onLeaveCompany}
       >
         <TeamAuthFields data={data} onLogin={onTeamLogin} onSetup={onTeamSetup} />
       </LoginSplit>
     );
   }
-
   return (
-    <div className="hero">
-      <div className="hero-decor" aria-hidden="true" />
-      <div className="hero-copy">
-        <div className="brand-label">
-          <span className="brand-photo"><img src={LOGO_SRC} alt="" /></span>
-          {businessName}
-        </div>
-        <h1>Tu talento,<br />bien agendado.</h1>
-        <p>Reservas, agenda y clientas de uñas y keratina, todo en un solo lugar.</p>
-        <div className="auth-choice">
-          <button className="choice-card" onClick={() => setMode("cliente")}>
-            <User size={20} />
-            <div>
-              <div className="choice-title">Soy cliente o clienta</div>
-              <div className="choice-sub">Reserva con tu nombre y celular, sin registrarte</div>
-            </div>
-          </button>
-          <button className="choice-card" onClick={() => setMode("equipo")}>
-            <Users size={20} />
-            <div>
-              <div className="choice-title">Soy del equipo</div>
-              <div className="choice-sub">Agenda, servicios y administración</div>
-            </div>
-          </button>
-        </div>
-        {onLeaveCompany && (
-          <button className="back-link" style={{ marginTop: "1.4rem" }} type="button" onClick={onLeaveCompany}>
-            &larr; No es mi empresa, cambiar código
-          </button>
-        )}
-      </div>
-      <div className="hero-card" aria-label="Tarjeta de servicios de belleza">
-        <div className="hero-photo"><img src={LOGO_SRC} alt="BellaStudio" /></div>
-        <strong>Manos que cuentan historias</strong>
-        <span>Uñas · Keratina · Cuidado personal</span>
-      </div>
-    </div>
+    <LoginSplit
+      eyebrow={businessName}
+      title={<>Tu cita.<br />Tu momento.<br />Tu mejor versión.</>}
+      quote="Cada cita es una oportunidad para que alguien se sienta espectacular."
+      onBack={onLeaveCompany}
+    >
+      <ClientAuthFields onAuth={onClientAuth} />
+    </LoginSplit>
   );
 }
 
@@ -2396,7 +2354,45 @@ function validateServiceFields({ name, duration, price }) {
   return errs;
 }
 
-function ServicesManager({ data, persist }) {
+function EnlacesEmpresa({ slug, businessName }) {
+  const [copiado, setCopiado] = useState("");
+  if (!slug) return null;
+  const base = window.location.origin;
+  const links = [
+    { key: "clientas", label: "Link para clientas", hint: "Compártelo en WhatsApp, Instagram o en tu estado. Abre directo el formulario de reserva.", url: `${base}/?empresa=${slug}` },
+    { key: "equipo", label: "Link del equipo", hint: "Solo para ti y tus trabajadoras. No lo publiques.", url: `${base}/equipo?empresa=${slug}` },
+  ];
+  async function copiar(l) {
+    try {
+      await navigator.clipboard.writeText(l.url);
+      setCopiado(l.key);
+      setTimeout(() => setCopiado(""), 1500);
+    } catch {
+      window.prompt("Copia el link:", l.url);
+    }
+  }
+  return (
+    <div className="panel" style={{ marginBottom: "1.5rem" }}>
+      <h3 className="section-title">Enlaces de tu negocio</h3>
+      {links.map((l) => (
+        <div key={l.key} style={{ marginBottom: ".9rem" }}>
+          <p className="field-hint" style={{ marginBottom: ".35rem" }}><strong>{l.label}:</strong> {l.hint}</p>
+          <div style={{ display: "flex", gap: ".6rem", alignItems: "center", flexWrap: "wrap" }}>
+            <input className="input" readOnly value={l.url} style={{ flex: "1 1 240px", marginBottom: 0 }} onFocus={(e) => e.target.select()} />
+            <button className="btn-ghost" onClick={() => copiar(l)}>{copiado === l.key ? "Copiado ✓" : "Copiar"}</button>
+            {l.key === "clientas" && (
+              <button className="btn-ghost" onClick={() => openWhatsApp("", `¡Reserva tu cita en ${businessName || "nuestro salón"}! Solo necesitas tu nombre y tu celular: ${l.url}`)}>
+                <MessageCircle size={14} /> Compartir
+              </button>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ServicesManager({ data, persist, companySlug }) {
   const [name, setName] = useState("");
   const [category, setCategory] = useState(CATEGORIES[0]);
   const [duration, setDuration] = useState(60);
@@ -2472,6 +2468,7 @@ function ServicesManager({ data, persist }) {
 
   return (
     <>
+      <EnlacesEmpresa slug={companySlug} businessName={data.businessName} />
       <div className="panel" style={{ marginBottom: "1.5rem" }}>
         <h3 className="section-title">WhatsApp del salón</h3>
         <p className="field-hint">A este número le llegan los comprobantes que envían las clientas al reservar. Si lo dejas vacío se usa el teléfono de la administradora.</p>
@@ -3785,7 +3782,7 @@ function ClientsManager({ data, persist }) {
   );
 }
 
-function TeamApp({ data, persist, session, onLogout, teamApi }) {
+function TeamApp({ data, persist, session, onLogout, teamApi, companySlug }) {
   const me = data.employees.find((e) => e.id === session.id);
   const [tab, setTab] = useState("agenda");
   const navItems = [{ key: "agenda", label: "Mi agenda", icon: Calendar }];
@@ -3822,7 +3819,7 @@ function TeamApp({ data, persist, session, onLogout, teamApi }) {
       {tab === "clientas" && me?.isAdmin && <ClientsManager data={data} persist={persist} />}
       {tab === "reportes" && me?.isAdmin && <ReportesView data={data} businessName={data.businessName} />}
       {tab === "equipo" && me?.isAdmin && <TeamManager data={data} persist={persist} />}
-      {tab === "servicios" && me?.isAdmin && <ServicesManager data={data} persist={persist} />}
+      {tab === "servicios" && me?.isAdmin && <ServicesManager data={data} persist={persist} companySlug={companySlug} />}
       {tab === "promociones" && me?.isAdmin && <PromotionsManager data={data} persist={persist} />}
       {tab === "inventario" && me?.isAdmin && <InventarioManager data={data} persist={persist} />}
       {tab === "gastos" && me?.isAdmin && <GastosManager data={data} persist={persist} />}
@@ -4073,6 +4070,16 @@ export default function App() {
   const [teamToken, setTeamToken] = useState(null);
   const [clientCreds, setClientCreds] = useState(null); // { clientId, phone }
   const [companySession, setCompanySession] = useState(null);
+  // /equipo?empresa=... (o ?empresa=...&equipo) abre el ingreso del equipo;
+  // cualquier otro link abre directo la reserva para clientas.
+  const [entryMode, setEntryMode] = useState(() => {
+    try {
+      const u = new URL(window.location.href);
+      return u.pathname.replace(/\/+$/, "").endsWith("/equipo") || u.searchParams.has("equipo") ? "equipo" : "cliente";
+    } catch {
+      return "cliente";
+    }
+  });
   const [initialCode] = useState(() => {
     try {
       return new URLSearchParams(window.location.search).get("empresa") || "";
@@ -4100,7 +4107,9 @@ export default function App() {
       if (v === "company" && cs) {
         logoutRef.current?.();
       } else if (v === "company" && !cs) {
-        leaveCompany();
+        // Si la clienta llegó por el link del salón, "Atrás" no la saca a la
+        // pantalla de códigos: se queda en el formulario de reserva.
+        if (!initialCode) leaveCompany();
       } else if (v === "platform-admin") {
         setPlatformSession(null);
         setView("gate");
@@ -4316,7 +4325,7 @@ export default function App() {
           registry={registry}
           adminKey={platformSession}
           persistRegistry={persistRegistry}
-          onEnterCompany={enterCompany}
+          onEnterCompany={(c) => { setEntryMode("equipo"); enterCompany(c); }}
           onLogout={() => { setPlatformSession(null); setView("gate"); }}
         />
       )}
@@ -4324,18 +4333,19 @@ export default function App() {
       {view === "company" && tenantData && !companySession && (
         <AuthScreen
           data={tenantData}
+          mode={entryMode}
           businessName={tenantData.businessName}
           onClientAuth={handleClientAuth}
           onTeamLogin={handleTeamLogin}
           onTeamSetup={handleTeamSetup}
-          onLeaveCompany={leaveCompany}
+          onLeaveCompany={initialCode ? null : leaveCompany}
         />
       )}
       {view === "company" && tenantData && companySession?.type === "cliente" && (
         <ClientApp data={tenantData} persist={async () => false} createAppointment={createAppointment} clientActions={clientActions} session={companySession} onLogout={logoutCompany} />
       )}
       {view === "company" && tenantData && !tenantData._public && companySession?.type === "empleado" && (
-        <TeamApp data={tenantData} persist={persistTenant} teamApi={teamApi} session={companySession} onLogout={logoutCompany} />
+        <TeamApp data={tenantData} persist={persistTenant} teamApi={teamApi} companySlug={activeCompany?.slug} session={companySession} onLogout={logoutCompany} />
       )}
     </div>
   );
