@@ -103,13 +103,17 @@ function loadImage(src) {
     img.src = src;
   });
 }
-// Dibuja el comprobante como imagen PNG (se puede compartir por WhatsApp como foto).
-async function comprobantePNG(data, appt, client, empName) {
-  const W = 900, H = 1180;
+// Dibuja un comprobante como imagen PNG (se comparte por WhatsApp como foto).
+// opts: { businessName, subtitle, badge: {text, ok}, codeLabel, code, rows: [[k,v]], total, footer }
+async function receiptPNG(opts) {
+  const rows = opts.rows || [];
+  const W = 900;
+  const H = 740 + rows.length * 62 + (opts.total != null ? 110 : 0);
   const c = document.createElement("canvas");
   c.width = W; c.height = H;
   const g = c.getContext("2d");
   const berry = "#a33e6b", deep = "#5c2240", gold = "#b8925a", ink = "#3b2231", muted = "#806f7d";
+  const round = (x, y, w, h, r) => { g.beginPath(); if (g.roundRect) g.roundRect(x, y, w, h, r); else g.rect(x, y, w, h); };
   g.fillStyle = "#fbf5f2"; g.fillRect(0, 0, W, H);
   const grad = g.createLinearGradient(0, 0, W, 300);
   grad.addColorStop(0, deep); grad.addColorStop(1, berry);
@@ -124,76 +128,147 @@ async function comprobantePNG(data, appt, client, empName) {
   }
   g.textAlign = "center"; g.fillStyle = "#fff";
   g.font = "bold 46px Nunito, Arial, sans-serif";
-  g.fillText(data.businessName || "BellaStudio", W / 2, logo ? 225 : 150);
+  g.fillText(opts.businessName || "BellaStudio", W / 2, logo ? 225 : 150);
   g.font = "26px Nunito, Arial, sans-serif"; g.fillStyle = "#f9dce7";
-  g.fillText("Comprobante de cita", W / 2, logo ? 268 : 200);
+  g.fillText(opts.subtitle || "", W / 2, logo ? 268 : 200);
 
-  // tarjeta
+  const x = 60, y = 340, w = W - 120, h = H - 340 - 150;
   g.fillStyle = "#fff"; g.strokeStyle = "#ead8df"; g.lineWidth = 2;
-  const x = 60, y = 340, w = W - 120, h = 700;
-  g.beginPath(); g.roundRect ? g.roundRect(x, y, w, h, 28) : g.rect(x, y, w, h); g.fill(); g.stroke();
+  round(x, y, w, h, 28); g.fill(); g.stroke();
 
-  const pend = appt.status === "pendiente";
-  g.fillStyle = pend ? "#fff3dc" : "#e6f4ea";
-  g.beginPath(); g.roundRect ? g.roundRect(W / 2 - 170, y + 36, 340, 54, 27) : g.rect(W / 2 - 170, y + 36, 340, 54); g.fill();
-  g.fillStyle = pend ? "#8a5a00" : "#1e6b35"; g.font = "bold 26px Nunito, Arial, sans-serif";
-  g.fillText(pend ? "PENDIENTE DE APROBACIÓN" : "CITA CONFIRMADA", W / 2, y + 72);
-
+  if (opts.badge) {
+    g.fillStyle = opts.badge.ok ? "#e6f4ea" : (opts.badge.danger ? "#fde8e8" : "#fff3dc");
+    round(W / 2 - 180, y + 36, 360, 54, 27); g.fill();
+    g.fillStyle = opts.badge.ok ? "#1e6b35" : (opts.badge.danger ? "#a12626" : "#8a5a00");
+    g.font = "bold 26px Nunito, Arial, sans-serif";
+    g.fillText(opts.badge.text, W / 2, y + 72);
+  }
   g.fillStyle = muted; g.font = "22px Nunito, Arial, sans-serif";
-  g.fillText("Código", W / 2, y + 140);
+  g.fillText(opts.codeLabel || "", W / 2, y + 140);
   g.fillStyle = berry; g.font = "bold 54px Nunito, Arial, sans-serif";
-  g.fillText(apptCode(appt), W / 2, y + 196);
+  g.fillText(opts.code || "", W / 2, y + 196);
 
-  const rows = [
-    ["Clienta", client?.name || ""],
-    ["Celular", client?.phone || ""],
-    ["Servicio", appt.serviceName],
-    ["Fecha", prettyDate(appt.date)],
-    ["Hora", hour12(appt.time)],
-    ["Profesional", empName || "—"],
-    ["Valor", money(appt.price) + (appt.promoTitle ? "  (promoción)" : "")],
-  ];
   let yy = y + 260;
+  const fit = (val, maxW) => {
+    let v = String(val);
+    if (g.measureText(v).width <= maxW) return v;
+    while (g.measureText(v + "…").width > maxW && v.length > 2) v = v.slice(0, -1);
+    return v + "…";
+  };
   rows.forEach(([k, v], i) => {
     if (i > 0) { g.strokeStyle = "#f1e4ea"; g.lineWidth = 1; g.beginPath(); g.moveTo(x + 40, yy - 38); g.lineTo(x + w - 40, yy - 38); g.stroke(); }
     g.textAlign = "left"; g.fillStyle = muted; g.font = "24px Nunito, Arial, sans-serif";
-    g.fillText(k, x + 40, yy);
+    const kk = fit(k, w * 0.55 - 40);
+    g.fillText(kk, x + 40, yy);
     g.textAlign = "right"; g.fillStyle = ink; g.font = "bold 26px Nunito, Arial, sans-serif";
-    let val = String(v);
-    while (g.measureText(val).width > w - 260 && val.length > 4) val = val.slice(0, -2);
-    if (val !== String(v)) val = val.slice(0, -1) + "…";
-    g.fillText(val, x + w - 40, yy);
+    g.fillText(fit(v, w - 80 - g.measureText(kk).width - 30), x + w - 40, yy);
     yy += 62;
   });
-
+  if (opts.total != null) {
+    g.strokeStyle = berry; g.lineWidth = 2; g.beginPath(); g.moveTo(x + 40, yy - 34); g.lineTo(x + w - 40, yy - 34); g.stroke();
+    g.textAlign = "left"; g.fillStyle = ink; g.font = "bold 30px Nunito, Arial, sans-serif";
+    g.fillText("TOTAL", x + 40, yy + 14);
+    g.textAlign = "right"; g.fillStyle = berry; g.font = "bold 40px Nunito, Arial, sans-serif";
+    g.fillText(opts.total, x + w - 40, yy + 16);
+  }
   g.textAlign = "center"; g.fillStyle = gold; g.font = "italic 24px Nunito, Arial, sans-serif";
-  g.fillText("Presenta este comprobante al llegar. ¡Te esperamos!", W / 2, H - 80);
+  g.fillText(opts.footer || "", W / 2, H - 80);
   g.fillStyle = muted; g.font = "18px Nunito, Arial, sans-serif";
   g.fillText(`Generado el ${new Date().toLocaleString("es-CO")}`, W / 2, H - 45);
-
   return new Promise((resolve) => c.toBlob((b) => resolve(b), "image/png"));
 }
 
-async function compartirComprobante(data, appt, client, empName) {
-  const blob = await comprobantePNG(data, appt, client, empName);
-  if (!blob) { window.alert("No se pudo generar el comprobante en este navegador."); return; }
-  const fileName = `cita-${apptCode(appt)}.png`;
+async function shareOrDownload(blob, fileName, title, text) {
+  if (!blob) { window.alert("No se pudo generar la imagen en este navegador."); return; }
   const file = new File([blob], fileName, { type: "image/png" });
   // En celulares (Android / iPhone) abre el menú de compartir: ahí se elige WhatsApp.
   try {
     if (navigator.canShare && navigator.canShare({ files: [file] })) {
-      await navigator.share({ files: [file], title: "Comprobante de cita", text: `Mi cita en ${data.businessName} · código ${apptCode(appt)}` });
+      await navigator.share({ files: [file], title, text });
       return;
     }
   } catch (err) {
-    if (err && err.name === "AbortError") return; // la clienta cerró el menú
+    if (err && err.name === "AbortError") return;
   }
-  // En computador: se descarga la imagen.
+  // En computador: se descarga la imagen para adjuntarla en WhatsApp Web.
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url; a.download = fileName;
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+
+function comprobantePNG(data, appt, client, empName) {
+  const pend = appt.status === "pendiente";
+  return receiptPNG({
+    businessName: data.businessName, subtitle: "Comprobante de cita",
+    badge: { text: pend ? "PENDIENTE DE APROBACIÓN" : "CITA CONFIRMADA", ok: !pend },
+    codeLabel: "Código", code: apptCode(appt),
+    rows: [
+      ["Clienta", client?.name || ""],
+      ["Celular", client?.phone || ""],
+      ["Servicio", appt.serviceName],
+      ["Fecha", prettyDate(appt.date)],
+      ["Hora", hour12(appt.time)],
+      ["Profesional", empName || "—"],
+      ["Valor", money(appt.price) + (appt.promoTitle ? "  (promoción)" : "")],
+    ],
+    footer: "Presenta este comprobante al llegar. ¡Te esperamos!",
+  });
+}
+
+async function compartirComprobante(data, appt, client, empName) {
+  const blob = await comprobantePNG(data, appt, client, empName);
+  await shareOrDownload(blob, `cita-${apptCode(appt)}.png`, "Comprobante de cita", `Mi cita en ${data.businessName} · código ${apptCode(appt)}`);
+}
+
+/* ---- Comprobante de servicio (venta) ---- */
+function ventaItems(venta) {
+  return venta.items && venta.items.length ? venta.items : [{ name: venta.serviceName, price: venta.price }];
+}
+function ventaTexto(venta, businessName) {
+  const items = ventaItems(venta);
+  return [
+    `Hola ${venta.clientName || ""} 💅`,
+    `Gracias por tu visita a *${businessName}*. Este es tu comprobante:`,
+    ``,
+    `*Comprobante de servicio N.° ${venta.consecutivo}*`,
+    `Fecha: ${prettyDate(venta.date)}${venta.time ? ` · ${hour12(venta.time)}` : ""}`,
+    `Atendida por: ${venta.employeeName || "—"}`,
+    ``,
+    ...items.map((it) => `• ${it.name}: ${money(it.price)}`),
+    ``,
+    `*Total: ${money(venta.price)}*`,
+    ...(venta.status === "anulada" ? [``, `⚠️ Este comprobante fue ANULADO.`] : []),
+    ``,
+    `¡Te esperamos pronto!`,
+  ].join("\n");
+}
+function ventaPNG(venta, businessName) {
+  const anulada = venta.status === "anulada";
+  return receiptPNG({
+    businessName, subtitle: "Comprobante de servicio",
+    badge: { text: anulada ? "ANULADO" : "SERVICIO PAGADO", ok: !anulada, danger: anulada },
+    codeLabel: "Comprobante N.°", code: String(venta.consecutivo),
+    rows: [
+      ["Clienta", venta.clientName || "—"],
+      ["Fecha", `${prettyDate(venta.date)}${venta.time ? " · " + hour12(venta.time) : ""}`],
+      ["Atendida por", venta.employeeName || "—"],
+      ...ventaItems(venta).map((it) => [it.name, money(it.price)]),
+    ],
+    total: money(venta.price),
+    footer: "¡Gracias por tu visita!",
+  });
+}
+function enviarVentaWhatsApp(venta, businessName) {
+  if (!normPhone(venta.clientPhone)) {
+    if (!window.confirm("Esta clienta no tiene celular guardado. ¿Abrir WhatsApp para elegir el contacto a mano?")) return;
+  }
+  openWhatsApp(venta.clientPhone, ventaTexto(venta, businessName));
+}
+async function compartirVentaImagen(venta, businessName) {
+  const blob = await ventaPNG(venta, businessName);
+  await shareOrDownload(blob, `comprobante-${venta.consecutivo}.png`, "Comprobante de servicio", `Comprobante N.° ${venta.consecutivo} · ${businessName}`);
 }
 
 function ComprobanteActions({ data, appt, client, compact }) {
@@ -363,10 +438,10 @@ async function apiSetTenant(slug, obj, auth = {}) {
     return { ok: false, status: 0 };
   }
 }
-async function apiPost(path, body) {
+async function apiPost(path, body, extraHeaders = {}) {
   // Para el ingreso del equipo y las acciones de las clientas.
   try {
-    const res = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
+    const res = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json", ...extraHeaders }, body: JSON.stringify(body || {}) });
     const json = await res.json().catch(() => ({}));
     return { ok: res.ok, status: res.status, ...json };
   } catch {
@@ -1809,7 +1884,9 @@ function ClientApp({ data, persist, session, onLogout, createAppointment, client
 
 /* ---------------------------------- Vista equipo / admin ---------------------------------- */
 
-function AgendaView({ data, persist, employeeId, onlyMine, isAdmin }) {
+function AgendaView({ data, persist, employeeId, onlyMine, isAdmin, teamApi }) {
+  const [reciboAbierto, setReciboAbierto] = useState(null);
+  const [completando, setCompletando] = useState(null);
   const [calYear, setCalYear] = useState(new Date().getFullYear());
   const [calMonth, setCalMonth] = useState(new Date().getMonth());
   const [selectedDate, setSelectedDate] = useState(todayISO());
@@ -1859,6 +1936,25 @@ function AgendaView({ data, persist, employeeId, onlyMine, isAdmin }) {
     const appointments = data.appointments.map((x) => (x.id === a.id ? { ...x, employeeId: reassignEmp } : x));
     await persist({ ...data, appointments });
     setReassignId(null); setReassignEmp("");
+  }
+
+  async function completar(a) {
+    const futura = a.date > todayISO();
+    const ok = window.confirm(
+      `¿Marcar como cumplida la cita de ${clientName(a.clientId)} (${a.serviceName}, ${a.date} ${a.time})?` +
+      (futura ? "\n\nOjo: esta cita es de una fecha futura." : "") +
+      "\n\nSe generará el comprobante de servicio."
+    );
+    if (!ok) return;
+    if (!teamApi) { await setStatus(a.id, "completada"); return; }
+    setCompletando(a.id);
+    try {
+      const res = await teamApi.complete(a.id);
+      if (!res.ok) { window.alert(res.error || "No se pudo completar la cita. Intenta de nuevo."); return; }
+      setReciboAbierto(res.venta);
+    } finally {
+      setCompletando(null);
+    }
   }
 
   async function setStatus(id, status) {
@@ -2028,12 +2124,18 @@ function AgendaView({ data, persist, employeeId, onlyMine, isAdmin }) {
                         {isAdmin && (
                           <button className="btn-ghost" onClick={() => enviarRecordatorio(a)}><MessageCircle size={14} /> Recordar</button>
                         )}
-                        <button className="btn-ghost" onClick={() => setStatus(a.id, "completada")}>Completada</button>
+                        <button className="btn-ghost" disabled={completando === a.id} onClick={() => completar(a)}>{completando === a.id ? "Generando…" : "Completada"}</button>
                         {isAdmin && (
                           <button className="btn-ghost-danger" onClick={() => setStatus(a.id, "cancelada")}>Cancelar</button>
                         )}
                       </>
                     )}
+                    {a.status === "completada" && (() => {
+                      const v = (data.ventas || []).find((x) => x.appointmentId === a.id && x.status !== "anulada");
+                      return v ? (
+                        <button className="btn-ghost" onClick={() => setReciboAbierto(v)}><Receipt size={14} /> Comprobante #{v.consecutivo}</button>
+                      ) : null;
+                    })()}
                   </div>
                 </div>
 
@@ -2082,6 +2184,14 @@ function AgendaView({ data, persist, employeeId, onlyMine, isAdmin }) {
           </div>
         </div>
       </div>
+      {reciboAbierto && (
+        <VentaReceipt
+          venta={(data.ventas || []).find((v) => v.id === reciboAbierto.id) || reciboAbierto}
+          businessName={data.businessName}
+          justCompleted={!!(data.appointments || []).find((x) => x.id === reciboAbierto.appointmentId && x.status === "completada") && Date.now() - (reciboAbierto.createdAt || 0) < 60000}
+          onClose={() => setReciboAbierto(null)}
+        />
+      )}
     </>
   );
 }
@@ -2841,10 +2951,16 @@ function ventaEnRango(venta, filtro) {
   return true;
 }
 
-function VentaReceipt({ venta, businessName, onClose }) {
+function VentaReceipt({ venta, businessName, onClose, justCompleted }) {
+  const [busy, setBusy] = useState(false);
   return (
     <div className="modal-overlay no-print" onClick={onClose}>
       <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+        {justCompleted && (
+          <p className="field-hint no-print" style={{ marginTop: 0 }}>
+            <Check size={14} /> Cita completada. Se generó este comprobante — envíaselo a la clienta por WhatsApp.
+          </p>
+        )}
         <div className="receipt print-area">
           <h3>{businessName}</h3>
           <p className="receipt-num">Comprobante de servicio N.° {venta.consecutivo}</p>
@@ -2861,13 +2977,18 @@ function VentaReceipt({ venta, businessName, onClose }) {
           )}
           <p><strong>Atendido por:</strong> {venta.employeeName}</p>
           <p><strong>Fecha:</strong> {venta.date} · {venta.time}</p>
+          {venta.clientPhone && <p><strong>Celular:</strong> {venta.clientPhone}</p>}
           {venta.status === "anulada" && <p style={{ color: "var(--danger)" }}><strong>ANULADA</strong></p>}
           <hr />
           <p className="receipt-total"><strong>{money(venta.price)}</strong></p>
         </div>
-        <div className="row-gap no-print" style={{ marginTop: "1.2rem" }}>
+        <div className="row-gap no-print" style={{ marginTop: "1.2rem", flexWrap: "wrap" }}>
+          <button className="btn-primary" onClick={() => enviarVentaWhatsApp(venta, businessName)}><MessageCircle size={15} /> Enviar por WhatsApp</button>
+          <button className="btn-ghost" disabled={busy} onClick={async () => { setBusy(true); try { await compartirVentaImagen(venta, businessName); } finally { setBusy(false); } }}>
+            <Download size={15} /> {busy ? "Generando…" : "Imagen"}
+          </button>
+          <button className="btn-ghost" onClick={() => window.print()}><Printer size={15} /> Imprimir / PDF</button>
           <button className="btn-ghost" onClick={onClose}>Cerrar</button>
-          <button className="btn-primary" onClick={() => window.print()}><Printer size={15} /> Imprimir / PDF</button>
         </div>
       </div>
     </div>
@@ -2894,10 +3015,7 @@ function VentasManager({ data, persist, businessName }) {
     await persist({ ...data, ventas: (data.ventas || []).filter((v) => v.id !== venta.id) });
   }
   function enviarWhatsapp(venta) {
-    const phone = (venta.clientPhone || "").replace(/\D/g, "");
-    if (!phone) { window.alert("Esta clienta no tiene teléfono registrado."); return; }
-    const msg = `Hola ${venta.clientName}, aquí tienes tu comprobante de ${businessName}:\n\nN.° ${venta.consecutivo}\nServicio: ${venta.serviceName}\nValor: ${money(venta.price)}\nFecha: ${venta.date}\n\n¡Gracias por tu visita!`;
-    window.open(`https://wa.me/${waPhone(phone)}?text=${encodeURIComponent(msg)}`, "_blank");
+    enviarVentaWhatsApp(venta, businessName);
   }
 
   return (
@@ -3667,7 +3785,7 @@ function ClientsManager({ data, persist }) {
   );
 }
 
-function TeamApp({ data, persist, session, onLogout }) {
+function TeamApp({ data, persist, session, onLogout, teamApi }) {
   const me = data.employees.find((e) => e.id === session.id);
   const [tab, setTab] = useState("agenda");
   const navItems = [{ key: "agenda", label: "Mi agenda", icon: Calendar }];
@@ -3693,11 +3811,11 @@ function TeamApp({ data, persist, session, onLogout }) {
       roleLabel={me?.isAdmin ? "Administradora" : "Equipo"}
       nav={navItems} active={tab} onNav={setTab} onLogout={onLogout}
     >
-      {tab === "agenda" && <AgendaView data={data} persist={persist} employeeId={me.id} onlyMine isAdmin={!!me?.isAdmin} />}
+      {tab === "agenda" && <AgendaView data={data} persist={persist} teamApi={teamApi} employeeId={me.id} onlyMine isAdmin={!!me?.isAdmin} />}
       {tab === "citas" && me?.isAdmin && (
         <>
           <NuevaCitaAdmin data={data} persist={persist} />
-          <AgendaView data={data} persist={persist} onlyMine={false} isAdmin />
+          <AgendaView data={data} persist={persist} teamApi={teamApi} onlyMine={false} isAdmin />
         </>
       )}
       {tab === "ventas" && me?.isAdmin && <VentasManager data={data} persist={persist} businessName={data.businessName} />}
@@ -4141,6 +4259,19 @@ export default function App() {
   const createAppointment = (appt) => clientCall("appointments", {
     serviceId: appt.serviceId, employeeId: appt.employeeId, date: appt.date, time: appt.time, promoId: appt.promoId,
   });
+  // Acciones del equipo que el servidor hace de forma segura (consecutivos).
+  const teamApi = {
+    complete: async (apptId) => {
+      if (!activeCompany || !teamToken) return { ok: false, error: "Tu sesión se cerró. Vuelve a ingresar." };
+      const res = await apiPost(
+        `/api/tenant/${encodeURIComponent(activeCompany.slug)}/team/appointments/${encodeURIComponent(apptId)}/complete`,
+        {}, { "x-team-token": teamToken }
+      );
+      if (res.ok && res.data) setTenantData(res.data);
+      if (res.status === 401) logoutRef.current?.();
+      return res;
+    },
+  };
   const clientActions = {
     cancel: (a) => clientCall(`appointments/${encodeURIComponent(a.id)}/cancel`, {}),
     reschedule: (a, date, time) => clientCall(`appointments/${encodeURIComponent(a.id)}/reschedule`, { date, time }),
@@ -4204,7 +4335,7 @@ export default function App() {
         <ClientApp data={tenantData} persist={async () => false} createAppointment={createAppointment} clientActions={clientActions} session={companySession} onLogout={logoutCompany} />
       )}
       {view === "company" && tenantData && !tenantData._public && companySession?.type === "empleado" && (
-        <TeamApp data={tenantData} persist={persistTenant} session={companySession} onLogout={logoutCompany} />
+        <TeamApp data={tenantData} persist={persistTenant} teamApi={teamApi} session={companySession} onLogout={logoutCompany} />
       )}
     </div>
   );
