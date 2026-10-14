@@ -39,6 +39,89 @@ function money(n) {
 function todayISO() { return toISO(new Date()); }
 function initialOf(name) { return (name || "?").trim().charAt(0).toUpperCase(); }
 
+/* ---- Instalar como app en el celular ---- */
+// Chrome (Android) avisa que la página se puede instalar con el evento
+// "beforeinstallprompt"; lo guardamos para mostrarlo con nuestro botón.
+let deferredInstallPrompt = null;
+const installListeners = new Set();
+if (typeof window !== "undefined") {
+  window.addEventListener("beforeinstallprompt", (e) => {
+    e.preventDefault();
+    deferredInstallPrompt = e;
+    installListeners.forEach((fn) => fn());
+  });
+  window.addEventListener("appinstalled", () => {
+    deferredInstallPrompt = null;
+    installListeners.forEach((fn) => fn());
+  });
+}
+function isStandalone() {
+  try {
+    return window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
+  } catch {
+    return false;
+  }
+}
+function deviceKind() {
+  const ua = navigator.userAgent || "";
+  const ios = /iphone|ipad|ipod/i.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+  const inApp = /FBAN|FBAV|Instagram|Line\/|; wv\)|WhatsApp/i.test(ua);
+  const android = /android/i.test(ua);
+  const iosNotSafari = ios && /CriOS|FxiOS|EdgiOS/i.test(ua);
+  return { ios, android, inApp, iosNotSafari };
+}
+
+function InstallAppButton({ label = "Instalar la app en tu celular" }) {
+  const [, force] = useState(0);
+  const [help, setHelp] = useState(false);
+  const [installed, setInstalled] = useState(isStandalone());
+  useEffect(() => {
+    const fn = () => force((n) => n + 1);
+    installListeners.add(fn);
+    return () => installListeners.delete(fn);
+  }, []);
+  if (installed) return null;
+  const kind = deviceKind();
+
+  async function instalar() {
+    if (deferredInstallPrompt) {
+      const p = deferredInstallPrompt;
+      deferredInstallPrompt = null;
+      p.prompt();
+      try {
+        const choice = await p.userChoice;
+        if (choice?.outcome === "accepted") setInstalled(true);
+      } catch { /* noop */ }
+      force((n) => n + 1);
+      return;
+    }
+    setHelp((h) => !h);
+  }
+
+  return (
+    <div style={{ marginTop: "1rem", textAlign: "center" }}>
+      <button type="button" className="btn-ghost" onClick={instalar} style={{ width: "100%", justifyContent: "center" }}>
+        <Download size={15} /> {label}
+      </button>
+      {help && (
+        <div className="field-hint" style={{ textAlign: "left", marginTop: ".7rem", background: "var(--blush, #fbeef3)", padding: ".8rem 1rem", borderRadius: 14, lineHeight: 1.5 }}>
+          {kind.inApp ? (
+            <>Estás viendo la página dentro de otra app (WhatsApp, Instagram…). Toca los <strong>tres puntos ⋮</strong> o el menú y elige <strong>“Abrir en el navegador”</strong>. Ahí vuelve a tocar este botón.</>
+          ) : kind.ios && kind.iosNotSafari ? (
+            <>En iPhone solo se puede instalar desde <strong>Safari</strong>. Copia el link, ábrelo en Safari y sigue los pasos.</>
+          ) : kind.ios ? (
+            <>En iPhone: toca el botón <strong>Compartir</strong> (el cuadrito con la flecha hacia arriba ⬆️) abajo en Safari, baja y elige <strong>“Agregar a inicio”</strong>. Luego toca <strong>Agregar</strong>.</>
+          ) : kind.android ? (
+            <>En Android: toca los <strong>tres puntos ⋮</strong> arriba a la derecha de Chrome y elige <strong>“Instalar aplicación”</strong> o <strong>“Agregar a la pantalla principal”</strong>.</>
+          ) : (
+            <>En el computador: en Chrome o Edge, toca el ícono de instalar <strong>⊕</strong> en la barra de direcciones, o el menú ⋮ → <strong>“Instalar”</strong>.</>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ---- Teléfonos y WhatsApp ---- */
 // Deja solo los dígitos y quita el indicativo 57 para comparar celulares
 // sin importar cómo los escribió la clienta ("300 123 4567", "+57 300...", etc.).
@@ -1171,6 +1254,7 @@ function ClientAuthFields({ onAuth }) {
         {error && <p className="error-text">{error}</p>}
         <button className="btn-primary" type="submit" disabled={busy}>{busy ? "Un momento…" : "Continuar"}</button>
       </div>
+      <InstallAppButton label="Instalar la app para reservar más rápido" />
     </form>
   );
 }
@@ -1218,6 +1302,7 @@ function TeamAuthFields({ data, onLogin, onSetup }) {
         {error && <p className="error-text">{error}</p>}
         <button className="btn-primary" type="submit" disabled={busy}>{busy ? "Verificando…" : "Entrar"}</button>
       </div>
+      <InstallAppButton label="Instalar la app del equipo" />
     </form>
   );
 }
@@ -2374,6 +2459,7 @@ function EnlacesEmpresa({ slug, businessName }) {
   return (
     <div className="panel" style={{ marginBottom: "1.5rem" }}>
       <h3 className="section-title">Enlaces de tu negocio</h3>
+      <p className="field-hint">Cada link se puede <strong>instalar como app</strong> en el celular: al abrirlo aparece el botón “Instalar la app”. La de clientas abre directo la reserva y la del equipo abre el ingreso con PIN.</p>
       {links.map((l) => (
         <div key={l.key} style={{ marginBottom: ".9rem" }}>
           <p className="field-hint" style={{ marginBottom: ".35rem" }}><strong>{l.label}:</strong> {l.hint}</p>
