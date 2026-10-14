@@ -585,10 +585,66 @@ app.post("/api/tenant/:slug/public/appointments/:id/review", (req, res) => {
 
 // Sirve el frontend ya compilado (npm run build) desde /dist
 const distPath = path.join(__dirname, "dist");
-app.use(express.static(distPath));
-app.get("*", (req, res) => {
-  res.sendFile(path.join(distPath, "index.html"));
+
+/* ------------------------------------------------------------------ */
+/* Instalar como app en el celular                                     */
+/* ------------------------------------------------------------------ */
+// Cada link se instala como su propia app: la de clientas abre directo la
+// reserva de esa empresa y la del equipo abre el ingreso del equipo.
+function escHtml(t) {
+  return String(t).replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
+}
+function appInfo(req) {
+  const slug = safeSlug(req.query.empresa);
+  const equipo = req.path.replace(/\/+$/, "").endsWith("/equipo") || req.query.equipo !== undefined;
+  const reg = readJSON(COMPANIES_FILE);
+  const company = slug ? (reg?.companies || []).find((c) => c.slug === slug) : null;
+  if (!company) return null;
+  const startUrl = equipo ? `/equipo?empresa=${slug}` : `/?empresa=${slug}`;
+  const name = equipo ? `${company.name} · Equipo` : company.name;
+  const firstWord = company.name.split(/\s+/)[0] || company.name;
+  const shortName = equipo ? `Equipo ${firstWord}`.slice(0, 15) : company.name.slice(0, 15);
+  return { slug, equipo, startUrl, name, shortName, companyName: company.name };
+}
+let indexCache = null;
+function renderIndex(req, res) {
+  try {
+    if (!indexCache || process.env.NODE_ENV !== "production") indexCache = fs.readFileSync(path.join(distPath, "index.html"), "utf-8");
+  } catch {
+    return res.status(500).send("Falta compilar la app (npm run build).");
+  }
+  let html = indexCache;
+  const info = appInfo(req);
+  if (info) {
+    const q = new URLSearchParams({ empresa: info.slug, ...(info.equipo ? { equipo: "1" } : {}) }).toString();
+    html = html
+      .replace(/href="\/manifest\.json"/, `href="/manifest.webmanifest?${q}"`)
+      .replace(/<title>[\s\S]*?<\/title>/, `<title>${escHtml(info.name)}</title>`)
+      .replace(/(name="apple-mobile-web-app-title" content=")[^"]*/, `$1${escHtml(info.shortName)}`);
+  }
+  res.set("Cache-Control", "no-cache").type("html").send(html);
+}
+app.get("/manifest.webmanifest", (req, res) => {
+  const info = appInfo(req);
+  const base = {
+    scope: "/", display: "standalone", orientation: "portrait",
+    background_color: "#fffafb", theme_color: "#a8406d", lang: "es",
+    icons: [
+      { src: "/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
+      { src: "/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
+      { src: "/icon-512-maskable.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
+    ],
+  };
+  const manifest = info
+    ? { ...base, id: info.startUrl, start_url: info.startUrl, name: info.name, short_name: info.shortName,
+        description: info.equipo ? `Agenda y administración de ${info.companyName}` : `Reserva tu cita en ${info.companyName}` }
+    : { ...base, id: "/", start_url: "/", name: "BellaStudio", short_name: "BellaStudio", description: "Reservas de citas" };
+  res.set("Cache-Control", "no-cache").type("application/manifest+json").send(JSON.stringify(manifest));
 });
+app.get(["/", "/index.html", "/equipo", "/equipo/"], renderIndex);
+
+app.use(express.static(distPath, { index: false }));
+app.get("*", renderIndex);
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Servidor corriendo en el puerto ${PORT}`));
